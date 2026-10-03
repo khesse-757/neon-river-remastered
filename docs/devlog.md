@@ -242,13 +242,18 @@ the music, and the `?audition` page plays nothing at all on his Mac.
 
 The playtester agent put numbers on the complaint before I touched anything:
 
-|                                             | Before                                  | After                                                 |
-| ------------------------------------------- | --------------------------------------- | ----------------------------------------------------- |
-| Lane step between consecutive fish (median) | 0.26 widths                             | on the sine: ≤ 0.31, typically 0.1–0.2                |
-| Direction reversals per 10 spawns           | 6.4                                     | under 3 in Still Water (one per crossing)             |
-| Longest gap without a spawn                 | 2.1 s (ten times a night, at the rests) | the stage's own period: 0.9 → 0.5 s                   |
-| Seconds per night with nothing near the net | 9.3                                     | 0.55                                                  |
-| Eel warnings with no eel                    | ~4.7 per night                          | 0 (a warning is cancelled if a guard removes the eel) |
+|                                             | Before                                  | After                                                    |
+| ------------------------------------------- | --------------------------------------- | -------------------------------------------------------- |
+| Lane step between consecutive fish (median) | 0.26 widths                             | 0.22                                                     |
+| Steps of 0.30 widths or more                | 44%                                     | 26% overall, 3% in Still Water                           |
+| Direction reversals per 10 spawns           | 6.4                                     | 4.7 overall, 2.2 in Still Water (the turns at the banks) |
+| Longest gap without a spawn                 | 2.1 s (ten times a night, at the rests) | the stage's own period: 0.9 → 0.5 s                      |
+| Seconds per night with nothing near the net | 9.3                                     | 0.55                                                     |
+| Eel warnings with no eel                    | ~4.7 per night                          | 0 (a warning is cancelled if a guard removes the eel)    |
+
+(Before and after were both measured by the playtester agent on the same seeds.
+The smooth part is the first half of the night; Neon Rapids and the sweep part
+of Bank to Bank are deliberately about as jumpy as the old game was all night.)
 
 - The old emitter was a linear ping-pong with random swing lengths, plus a
   fairness guard that moved fish 0.4 widths sideways when an eel was nearby.

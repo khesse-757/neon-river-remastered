@@ -15,53 +15,112 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 ## Gate status
 - [x] Gate 0 — Design + tech plan approved (2026-10-02)
 - [x] Gate 1 — Look-dev slice: merged as the foundation (PR #1, 2026-10-03). Look NOT approved: too flat and low-res.
-- [ ] Gate 1.5 — Art direction v2 + audio: look direction approved by Kyle (capped actors approved); round 2 (pace, leitmotif, win) built, awaiting review (branch `gate-1.5/art-v2`, PR #2)
+- [ ] Gate 1.5 — Art direction v2 + audio: **look approved by Kyle** (2026-10-03, round-3 notes); round 3 (fish pattern, calmer audio, audition fix, advanced audio) built, awaiting Kyle's review (branch `gate-1.5/art-v2`, PR #2)
 - [ ] Gate 2 — Full loop playable
 - [ ] Gate 3 — Polish + QA pass
 - [ ] Gate 4 — Release candidate
 
-## Current state (2026-10-03, HEAD 02ae163 on `gate-1.5/art-v2`, PR #2 draft, CI green)
+## Current state (2026-10-03, Gate 1.5 round 3 on `gate-1.5/art-v2`, PR #2 draft)
 
-Stopped at Kyle's request after Gate 1.5 round 2. Waiting on Kyle; do not merge PR #2 or start Gate 2 until he says so.
+Stopped for Kyle's review after round 3. Do not merge PR #2 or start Gate 2 until he says so.
 
 ### Decisions pending from Kyle
-1. **Motif:** pick one on `?audition` (Lantern is the default; Heron and Ripple are the alternatives).
-2. **Pace feel:** play it and say whether it is now lively enough; if not, try `?tune` and paste the copied values back.
-3. **Spawn period:** keep 0.42 s with a heavy late eel share, or accept faster wins / a different escape rule to get nearer the 0.28 s he asked for (see "Pace" below for why both cannot hold).
-4. **Look approval** for Gate 1.5 (v2 direction and capped actor resolution are already approved), or a list of changes.
-5. **Audio by ear:** motifs, voice warmth, mix balance, ducking, loop seams. None of it has been heard by anyone; only timing, routing and levels are measured.
-6. **Real phone pass:** touch feel, safe areas on a real notch, Safari, frame rate.
+1. **Spawn gap vs win time.** Still Water spawns every 0.9 s (then 0.74 / 0.62 / 0.5 s), not the ~0.5 s he asked for everywhere. With 8% koi and 5% eels, a 0.5 s period supplies 2.5 lb/s: first speed-up at 0:18, win near 1:20. I kept the 2:00–2:30 win and his Still Water mix. He can feel the denser version with `?tune` (density ×1.8). Options if he wants 0.5 s: accept ~1:20 wins, or cut koi / add eels early.
+2. **Difficulty is fragile at the end.** Human-like win rate is 60% (57% over 400 seeds), at the top of the 35–60% band, and Bank to Bank's period moves it ~12 points per 0.01 s (0.48 s → 32%, 0.52 s → 79%). The cliff is eel deaths. A real-player check matters more than more bot tuning.
+3. **Motif:** ripple is the default; he will choose on `?audition` now that it plays. Players can switch in Advanced audio.
+4. **Audio by ear:** nobody has listened. Levels, routing, envelopes and non-silence are measured; clash, calmness and click-freeness by ear are not.
+5. **Simple-panel semantics** (my choices): the Sounds switch and fader cover splashes, ambience and UI together; stingers follow Music, or Sounds when Music is off.
+6. **Removed at his request mid-round:** the neon surge at speed-ups and the score tablet's pulse. The speed-up cue is now stinger + sign + quiet current streaks. The win's fireworks and neon were left alone; confirm that is what he meant.
+7. **Real phone pass:** touch feel, safe areas, Safari audio unlock, frame rate, and the settings list's scroll-vs-fader behaviour (verified only with emulated touch).
 
 ### Links
-- PR #2: https://github.com/khesse-757/neon-river-remastered/pull/2 (PR #1 merged; `main` ruleset `protect-main`, id 24406934, active)
-- Dev pages (dev server, default port 5188): `/?tune` (pace multipliers, docked strip, "copy values"), `/?audition` (three motifs), `/?theme=lantern|heron|ripple`, `/?actors=device`, `/?debug`
-- Videos: `docs/media/gate-1.5/full-run-desktop.webm`, `full-run-mobile.webm` (bot-played night to the win), `eel-basket-desktop.webm`, `eel-basket-mobile.webm`
-- Stills: `docs/media/gate-1.5/` — `win-*`, `win-results-*`, `eel-basket-*`, `eel-storm-*`, `title-settings-*`, `pause-mix-*`, `koi-scoop-*`, `eel-near-*`, `early-phase-*`, `rest-banner-*`, `v1-vs-gate1-vs-gate1.5.png`, `sheet-actors-device-vs-capped-mobile.png`
-- The videos and stills were recorded at b344968, one commit before the final win-wash and basket-glow tweak, so the win in them is slightly warmer than the current build. Re-record before using them for the blog.
+- PR #2: https://github.com/khesse-757/neon-river-remastered/pull/2
+- Videos (H.264 .mp4, bot-played night to the win, seed 42, production build): `docs/media/gate-1.5-r3/full-run-desktop.mp4`, `full-run-mobile.mp4`
+- Stills: `docs/media/gate-1.5-r3/` — `speed-up-*`, `pause-*` (settings panel), `phase-bank-to-bank-*`, `win-*`, `win-results-*`, `active-play-*`
+- Dev pages (dev server, port 5188): `/?audition`, `/?tune`, `/?theme=lantern|heron|ripple`, `/?debug`
 - Bot numbers: `npm run playtest -- --oracle 100 --human 200` (writes `artifacts/playtest.json`)
 
 ### Open minors (none are blockers or majors)
-- Fisherman's win cheer does not read (reviewer round 4).
-- About 4.7 eel warnings per run are orphaned when a phase ends: crackle and glow for an eel that never comes. No eel is ever unwarned.
-- First load slower than 2.5 s: the start sting plays on the fallback voice, off the music grid.
-- Open `?tune` dock hides the net at 320×568 and in landscape (dev tool only).
-- Pause/settings panel sits at exactly 100 draw calls (mobile budget 100); textures 57–81 vs the inspector's starting budget of 40. Both come from one quad/texture per UI element; atlas the UI in Gate 2.
-- Difficulty rises in steps (flat 0–45 s and 60–120 s, most losses after 2:00) rather than continuously.
-- Eel-window fairness guard is never exercised with a single emitter; it will matter when Braided Stream gets its second emitter.
-- Focus ring crosses neighbouring text at 1 CSS px per texel (320×568, 844×390).
-- Net looks detached at lane 1 and its cloth overlaps the parapet at lane 0.
+- The first spawn after each speed-up still waits out the previous stage's period (three gaps a night of 0.90 / 0.74 / 0.62 s inside stages whose own period is shorter). A fix that shortened the pending timer cut eel warnings short and shifted the balance; reverted.
+- Neon Rapids and the sweep part of Bank to Bank are as jumpy as the old game was (6.6 and 7.3 direction changes per 10 spawns); the smooth dance is Still Water and Quickening. By design ("more randomness"), but Kyle should judge it.
 - No landscape orientation hint on phones; tablet portrait crowds the top-left HUD.
-- Fry smoke is visible but faint.
-- `SceneRenderer.dispose()` does not free every GPU resource (HMR only); the end-of-run screen steps the sim with a variable delta.
-- `dist/` ships files the game never loads (original 2.2 MB painting, three unused grids, source maps): Gate 4.
-- Sliders are a few percent off near the track ends (native thumb width).
+- The spawn guards (jump clamp, eel-window relocation, skip) never fire at the shipped pace; they only exist for `?tune`. The eel-window guard and `telegraphCancel` are exercised only by a density-×2.2 unit test.
+- Brief §2 and §4.8 still promise weather per phase (rain, storm, moonrise); none exists yet and there are no phases now. Needs a Gate 2 design answer.
+- CLAUDE.md says dev tools load only behind DEV or `?debug`; `?tune` and `?audition` also load lazy chunks in production (never on the default path). Kyle uses both; the rule's wording should be his call.
+- Focus ring crosses neighbouring text at 1 CSS px per texel; net looks detached at lane 1; fry smoke faint; `dispose()` leaks on HMR; `dist/` ships unused files (Gate 4).
+- Textures 59 in play vs the inspector's starting budget of 40 (one per UI label). The settings list is now one texture; the HUD and screens are not yet atlased.
 
 ### Not verified by anyone
-- Audio by ear; real phone / Safari / gamepad; a truly hidden tab during the win; frame rate on a mid-range phone (59 fps is from a desktop Apple GPU).
-- The last commit (02ae163: win wash, basket glow, sting guard) and the test-timeout fix (c64efb5) were not seen by the reviewer; CI is green on both.
+- Audio by ear; real phone / Safari / gamepad; haptics; frame rate on a mid-range phone (59 fps is from a desktop Apple GPU); the suspend/resume seam when the tab is hidden; the `?tune` dock's open state and auto-collapse (the reviewer could not expand it by script; its collapsed bar clears the gear, mute and net at 320×568, 390×844, 844×390 and 1440×900).
+- The fresh-eyes reviewer saw 7516c32. The fixes for its findings (fd225bb), the removal of the neon surge and tablet pulse (aced2b7) and the new videos have not been re-reviewed; they are covered by unit tests, e2e (also under software GL) and my own captures.
 
 ### Environment note
-- A vite dev server that this session did not start is listening on 5188 from the main checkout (PID 17287 when last seen). Left alone. Playwright's config reuses whatever is on 5188, so `npm run test:e2e` tests that server's tree while it is up.
+- A vite dev server that this session did not start is listening on 5188 from the main checkout (PID 17287). Left alone; Playwright reuses it locally.
+
+## Gate 1.5, round 3 (Kyle's notes of 2026-10-03) — the dance, calmer audio
+
+### Fish pattern (brief §3.3 rewritten)
+- Director rebuilt: one emitter in eased swings. Still Water is a sine, bank to bank. Speed-ups at 40 / 90 / 140 lb or 0:35 / 1:05 / 1:35 move to Quickening, Neon Rapids and Bank to Bank (bursts of 2–4 pinned at a bank, then the other bank; zigzags; eels in the chain). No rests, no phases; one current carries every fish; fish spawn on the emitter and never change lane; swim wobble roughly halved (tail amplitude 0.055 / 0.065 / 0.045 of body length, head nearly still).
+- **Tuning values** (`src/sim/config.ts`), all new this round:
+
+| Stage | Speed | Period | Bank-to-bank sweep | Swing | Reversals /s | Eel roll, spacing (measured share) | Koi |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Still Water | 1 | 0.90 s | 4.0 s | full | 0 | 6.7%, 5 fish (4%) | 8% |
+| Quickening | 1.12 | 0.74 s | 3.0 s | 55–100% | 0.12 | 22%, 2 fish (14%) | 8% |
+| Neon Rapids | 1.254 | 0.62 s | 1.8 s | 40–100% | 0.30 | 40%, 1 fish (25%) | 8% |
+| Bank to Bank | 1.405 | 0.50 s | 1.15 s | 40–100%, bursts 65% | 0.40 | 50%, none (46%) | 7% |
+
+  Also: travel 3.0 s at speed 1; current eases over 0.25 s; banks at lanes 0.08 / 0.92; river pre-run 1.4 s; sweep guard at half the net's reach since the last fish. Removed: `restSeconds`, the continuous ramp, the nine-phase table, the prefill table, `maxJump`.
+- Tuning path: first table (periods 0.8 → 0.48) won in 1:45; slowing supply and correcting the effective eel share (spacing lowers it) gave 2:08–2:16; Bank to Bank period 0.47 s dropped the human-like win rate to 24%, so it sits at 0.50 s.
+
+### Playtest (playtester agent, same seeds before and after)
+| | Before (eaf3a1e) | After (7516c32; sim unchanged since) | Target |
+| --- | --- | --- | --- |
+| Oracle | 100/100, 0 eel contacts | 100/100, 0 eel contacts, 0 lb escaped | every seed, 0 eels |
+| Human-like win rate | 49% | 60% (57% over 400 seeds) | 35–60% |
+| Human-like median win (p25–p75) | 2:20 | 2:16 (2:09–2:23) | 2:00–2:30 |
+| Speed-ups, human-like median | n/a | 0:29 / 1:02 / 1:32 | ~0:30 / 1:00 / 1:30 |
+| First catch | 1.65 s | 1.52 s | ~2 s |
+| Longest gap without a spawn | 2.08 s | 0.90 s | (asked: ~0.5 s) |
+| Net zone empty per night | 9.3 s, 11 spells | 0.55 s, 1 spell (the opening) | none |
+| Lane step, median / share ≥ 0.30 | 0.263 / 44% | 0.216 / 26% (Still Water 3%) | curves |
+| Direction changes per 10 spawns | 6.4 | 4.7 (Still Water 2.2) | |
+| Orphaned eel warnings per night | ~4.7 | 0 | 0 |
+| Human-like losses | spread over 4 loop phases | 79 of 80 in Bank to Bank (35 eel, 44 escaped) | |
+
+Pace curve, median lb (speed-ups at about 29 s, 61 s, 90 s):
+| t (s) | 15 | 30 | 45 | 60 | 75 | 90 | 105 | 120 | 135 | 150 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Oracle | 20 | 41 | 64 | 88 | 115 | 141 | 165 | 191 | 200 | 200 |
+| Human-like, all runs | 20 | 40 | 64 | 87 | 112 | 136 | 157 | 173 | 189 | 200 |
+| Human-like, winners | 19 | 40 | 64 | 88 | 111 | 135 | 158 | 178 | 198 | 200 |
+
+Sensitivity (400 human-like seeds, Bank to Bank period): 0.46 s 23% · 0.48 s 32% · 0.49 s 41% · **0.50 s 57%** · 0.51 s 69% · 0.52 s 79% · 0.54 s 87%.
+
+### Audio
+- **Silent `?audition` root cause:** motifs were routed through the in-game master mute and the Fish Notes switch (measured: 0.0000 RMS with a saved mute; bed only with Fish Notes off; 0.33 on a clean profile). The page now ignores both, plays at default levels, and shows a live output meter.
+- Fish Notes off by default; a catch is a splash plus a 120 ms sine chime on the tonic or fifth. Spawn tick removed; warning and near-miss crackle softened; miss is a soft low knock when Fish Notes are off.
+- Envelopes on every voice, cues fade instead of stopping, duplicates within 45 ms play once, 16-voice cap, samples preload with an OfflineAudioContext before the first gesture; the start sting waits for the koto sample only.
+- Graph: 5 faders + cue + preview → master (volume, mute) → mono fold-down → low-cut → bass / mid / treble → voicing → compressor → limiter → night trim → background fade → analyser. Reverb sends are post-fader. Settings in `src/audio/settings.ts`, saved under `neonriver2_audio_v2` (new key: the old one stored Fish Notes as on).
+- Advanced audio (`src/ui/SettingsPanel.ts`): six faders, instrument (koto / kalimba / soft bell / marimba) and theme with previews, EQ presets + bass / mid / treble ±6 dB, reverb, mono, mute in background, haptics, test sound with meter, reset.
+
+### UI
+- Settings list is one canvas-backed quad over a natively scrolling DOM list; pause panel 100 → 72 draw calls (68 with Advanced open). Faders take pointers through a grip, so a touch starting on a fader scrolls.
+- Gear and mute top-left on every screen; Esc / Enter close the panel where there is no pause.
+- Score pop rises and fades at the catch point. Tablet pulse and neon surge added, then removed at Kyle's request.
+- Fisherman hops and calls "A FULL NET!" on a win. `?tune` dock top-right, collapses on any touch outside it.
+
+### Verification
+- `npm run check`: lint, typecheck, 38 unit tests (29 sim, 3 settings, 6 melody), secret scan. Build passes.
+- Playwright (5 tests; also run with `PW_SOFTWARE_GL=1`): smoke on desktop and mobile (corner controls on every screen, settings persistence, 44 px targets, touch scroll vs fader, knob accuracy, pause panel under 100 draw calls) and `audio.spec.ts` (18 audition buttons on a clean and on a fully muted profile; in-game start sting, catch, eel shock and win fanfare, one soloed at a time). The in-game test was mutation-checked: silencing each of the four sounds makes it fail.
+- Performance (production preview, Apple GPU): 59.2 fps desktop, 59.3 fps mobile-capped, ≤ 68 draw calls in play, 90 on the results card.
+
+### Fresh-eyes review, round 5 (HEAD 7516c32): "needs fixes" — 1 blocker, 3 majors
+- Blocker: CI red, the in-game audio test missed the win fanfare on software GL. Major: that test passed with any of its sounds removed. Both fixed (solo hook, real win path) and mutation-checked.
+- Major: a touch scroll starting on a fader changed it. Fixed with the grip; covered by the mobile smoke test (emulated touch).
+- Major: the 0.9 s gap needs Kyle's sign-off (pending decision 1).
+- Minors fixed: panel state leaking into hook states; beds cut when stopped mid fade-in; sting dropped on slow connections; Esc / Space / Enter with the panel open; Sounds fader not covering ambience; stingers silent with Music off; Night lost when a tone slider moved, and barely quieter; warning cancel hitting a newer warning; knob one step off at 1 px per texel; streaks under reduced motion; stale brief wording.
+- Left open: listed under "Open minors".
 
 ## Gate 1.5, round 2 (Kyle's review of 2026-10-03) — pace, leitmotif, win
 
@@ -213,6 +272,6 @@ Fixed after the review (not re-reviewed by the agent; verified by my own capture
 - Brief flags 1 and 3 (win time vs table; Braided Stream density) are open until Gate 2.
 
 ## Next actions
-1. Kyle: the six pending decisions at the top of this file.
-2. After his notes: apply them on `gate-1.5/art-v2`, re-record the gate-1.5 media, re-run the playtester and the fresh-eyes-reviewer if code changed.
-3. On approval: Kyle merges PR #2; Gate 2 starts on `gate-2/full-loop` (second emitter for Braided Stream, weather beats per phase, assist, Hard River, settings for touch mode / reduced motion / reduce flashing, UI atlas, smoother difficulty climb).
+1. Kyle: the pending decisions at the top of this file; play it, listen to it, and try `?audition`.
+2. After his notes: apply them on `gate-1.5/art-v2`, re-record the round-3 media, re-run the playtester and the fresh-eyes-reviewer.
+3. On approval: Kyle merges PR #2; Gate 2 starts on `gate-2/full-loop` (weather beats, assist, Hard River, settings for touch mode / reduced motion / reduce flashing, UI atlas, landscape hint, a real-player difficulty pass on Bank to Bank).
