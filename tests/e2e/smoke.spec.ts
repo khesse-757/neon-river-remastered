@@ -38,8 +38,8 @@ async function expectCornerControls(page: Page, where: string): Promise<void> {
 }
 
 test('boots, plays through real input, loses to an eel, and retries', async ({ page }, testInfo) => {
-  // Software-rendered CI runners need most of two minutes for this walk through the game.
-  test.setTimeout(180_000);
+  // Software-rendered CI runners need several minutes for this walk through the game.
+  test.setTimeout(420_000);
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());

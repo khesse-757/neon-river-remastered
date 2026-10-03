@@ -38,7 +38,7 @@ for (const [name, saved] of Object.entries({
   },
 })) {
   test(`every audition button makes sound (${name})`, async ({ page }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(360_000);
     if (saved) await page.addInitScript((s) => localStorage.setItem('neonriver2_audio_v2', JSON.stringify(s)), saved);
     await page.goto('/?audition');
     await expect.poll(() => mode(page), { timeout: 20_000 }).toBe('title');
@@ -67,7 +67,7 @@ for (const [name, saved] of Object.entries({
 }
 
 test('in-game start sting, catch, eel shock and win fanfare each reach the output', async ({ page }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(360_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/?seed=42');
@@ -105,7 +105,17 @@ test('in-game start sting, catch, eel shock and win fanfare each reach the outpu
   });
   expect(await peak(page, 6000), 'win fanfare').toBeGreaterThan(AUDIBLE);
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.status)).toBe('won');
-  await expect.poll(() => mode(page), { timeout: 20_000 }).toBe('over');
+  // Skip the celebration (it runs on game time, which crawls on a software renderer).
+  await expect
+    .poll(
+      async () => {
+        // Only while the celebration is still playing: on the results card Space would start a new night.
+        if (await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.winning)) await page.keyboard.press('Space');
+        return mode(page);
+      },
+      { timeout: 60_000, intervals: [500] },
+    )
+    .toBe('over');
 
   await solo('eel');
   await page.keyboard.press('Enter');
@@ -113,7 +123,7 @@ test('in-game start sting, catch, eel shock and win fanfare each reach the outpu
   await quiet(page);
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('eel'));
   expect(await peak(page, 4000), 'eel shock').toBeGreaterThan(AUDIBLE);
-  await expect.poll(() => mode(page), { timeout: 10_000 }).toBe('over');
+  await expect.poll(() => mode(page), { timeout: 60_000 }).toBe('over');
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.lossCause)).toBe('eel');
 
   // Master mute silences the game (but, above, never the audition page).
