@@ -1092,10 +1092,17 @@ export class Game {
     const inGutter = gutter >= h + 6;
     const controlSize = Math.max(13, Math.ceil(44 / this.texelCss()));
     const corner = this.cornerTexels();
-    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : corner.x;
-    // Without a gutter the tablet sits top-left under the pause button, over trees and sky: the
-    // cobbles belong to the basket and the fisherman.
-    const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : corner.y + controlSize + 5;
+    // The tablet never covers the painting if it can help it. First choice: centred just below
+    // it, as on a phone. A wide window with no room below: in the left gutter, beside the bridge,
+    // level with the foot of the painting. Only a screen with no gutter at all puts it top-left
+    // under the buttons, over trees and sky (the cobbles belong to the basket and the fisherman).
+    const beside = !inGutter && originX >= w + 8;
+    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : beside ? originX - w - 4 : corner.x;
+    const y = inGutter
+      ? originY + gridH + Math.floor((gutter - h) / 2)
+      : beside
+        ? Math.min(bottom, originY + gridH) - h - 4
+        : corner.y + controlSize + 5;
     // The tablet stays calm: the number changes, nothing lights up (Kyle found a pulse distracting).
     v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
@@ -1105,7 +1112,13 @@ export class Game {
     v.label('hud-escaped-label', show ? 'ESCAPED' : '', x + 53, y + 3, '#a1987a');
     const danger = s.escaped >= this.config.maxEscaped - 6;
     v.label('hud-escaped', show ? `${s.escaped}/${this.config.maxEscaped}` : '', x + 53, y + 12, danger ? '#ff9933' : '#9ccbcf');
-    v.label('hud-streak', show && this.mode !== 'over' && s.streak >= 3 ? `x${s.streak}` : '', x + w + 4, y + 8, '#ffd98a');
+    v.label(
+      'hud-streak',
+      show && this.mode !== 'over' && s.streak >= 3 ? `x${s.streak}` : '',
+      beside ? x + 5 : x + w + 4,
+      beside ? y - 11 : y + 8,
+      '#ffd98a',
+    );
 
     // Phase banner: a hanging wooden sign over the sky, clear of the river's path.
     const banner = this.banner > 0 && this.mode === 'playing' && !this.settingsOpen;
