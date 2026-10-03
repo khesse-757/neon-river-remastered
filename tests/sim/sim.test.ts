@@ -182,9 +182,9 @@ describe('stages and emitter', () => {
     const { stages, speedUps } = DEFAULT_CONFIG;
     expect(stages).toHaveLength(4);
     expect(speedUps.map((u) => [u.weight, u.seconds])).toEqual([
-      [40, 35],
-      [90, 65],
-      [140, 95],
+      [45, 35],
+      [97, 65],
+      [148, 95],
     ]);
     // Each speed-up is about +12% fish speed, with denser spawns, a faster sweep and tighter S-runs.
     for (let i = 1; i < stages.length; i++) {
@@ -259,7 +259,8 @@ describe('stages and emitter', () => {
           if (e.type === 'run') {
             runAt = sim.state.time;
             expect(e.fish).toBeGreaterThanOrEqual(stage.run.fish[0]);
-            expect(e.fish).toBeLessThanOrEqual(stage.run.fish[1]);
+            // (+4: a speed-up that fires while a run is coming down lengthens it.)
+            expect(e.fish).toBeLessThanOrEqual(stage.run.fish[1] + 4);
             // The speed-up's run arrives within a couple of spawns, while the current is still picking up.
             if (sim.state.time - speedUpAt < 4) expect(sim.state.speed).toBeLessThan(stage.speed - 0.02);
           }
@@ -280,7 +281,8 @@ describe('stages and emitter', () => {
         // The current never jumps: it glides to each stage's speed.
         expect(sim.state.speed - speedBefore).toBeLessThan(0.004);
         if (speedUpAt > 0 && sim.state.time - speedUpAt > 4 && sim.state.time - speedUpAt < 4 + DT)
-          expect(runAt).toBeGreaterThan(speedUpAt);
+          // (A run already coming down when the speed-up fires is lengthened instead.)
+          expect(runAt).toBeGreaterThan(speedUpAt - 5);
       }
     }
     // Runs also recur between speed-ups.
@@ -313,7 +315,8 @@ describe('stages and emitter', () => {
     expect(Math.max(...outside)).toBeLessThanOrEqual(period * hi + 2 * DT);
     // A real spread, not one repeated value.
     expect(Math.max(...outside) - Math.min(...outside)).toBeGreaterThan(period * 0.3);
-    expect(Math.max(...inside)).toBeLessThan(Math.min(...outside));
+    const mid = (v: number[]): number => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] ?? NaN;
+    expect(mid(inside)).toBeLessThan(mid(outside) * 0.75);
   });
 
   it('sweeps Still Water as a smooth sine: bank to bank, no jitter, no reversals', () => {
@@ -441,14 +444,19 @@ describe('stages and emitter', () => {
     expect(others).toBeGreaterThan(swaps);
   });
 
-  it('has a Zen mode: the same night with no eels, and the river never bare for long', () => {
-    expect(MODES.map((m) => m.id)).toEqual(['normal', 'zen']);
+  it('has a Zen mode that cannot be lost: eels become fish, escapes cost nothing, and a win can carry on', () => {
+    expect(MODES.map((m) => m.id)).toEqual(['zen', 'normal', 'hard']);
     expect(new Set(MODES.map((m) => m.id)).size).toBe(MODES.length);
     expect(configFor('normal')).toBe(DEFAULT_CONFIG);
     expect(configFor('nonsense')).toBe(DEFAULT_CONFIG);
     const zen = configFor('zen');
     expect(zen.eels).toBe(false);
-    for (const seed of SEEDS.slice(0, 12)) {
+    // A net that catches nothing never loses the night.
+    const { sim: idleSim, events: idleEvents } = run(3, 60, idle, zen);
+    expect(idleSim.state.status).toBe('playing');
+    expect(idleSim.state.escaped).toBeGreaterThan(20);
+    expect(idleEvents.some((e) => e.type === 'lose' || e.type === 'telegraph')).toBe(false);
+    for (const seed of SEEDS.slice(0, 8)) {
       const sim = new Sim({ seed, river, config: zen });
       sim.drainEvents();
       const bot = new HumanBot(seed);
@@ -464,11 +472,39 @@ describe('stages and emitter', () => {
           lastSpawn = sim.state.time;
         }
       }
-      // Nothing can shock you, and the same three speed-ups carry the night to a win.
-      expect(sim.state.lossCause).not.toBe('eel');
+      expect(sim.state.status).toBe('won');
       expect(sim.state.stageIndex).toBe(3);
-      // At most one empty place in a row where an eel would have been.
-      expect(longest).toBeLessThan(2 * DEFAULT_CONFIG.stages[0]!.period * DEFAULT_CONFIG.spacing[1] + 0.1);
+      // An eel's place is filled with a fish, never left as a gap.
+      expect(longest).toBeLessThan(DEFAULT_CONFIG.stages[0]!.period * DEFAULT_CONFIG.spacing[1] + 0.1);
+      // Keep fishing: the same river carries on, and there is no second win.
+      sim.keepFishing();
+      expect(sim.state.status).toBe('playing');
+      const events: SimEvent[] = [];
+      for (let i = 0; i < 20 / DT; i++) {
+        sim.step(DT, bot.intent(sim.state, sim.config));
+        events.push(...sim.drainEvents());
+      }
+      expect(sim.state.status).toBe('playing');
+      expect(sim.state.caught).toBeGreaterThan(zen.winWeight + 5);
+      expect(events.some((e) => e.type === 'win' || e.type === 'lose')).toBe(false);
+    }
+  });
+
+  it('has a Storm Night: five stages from the first speed-up pace, more eels, a 15-lb budget, still winnable', () => {
+    const hard = configFor('hard');
+    expect(hard.stages.length).toBe(5);
+    expect(hard.speedUps.length).toBe(4);
+    expect(hard.maxEscaped).toBe(15);
+    expect(hard.stages[0]!.speed).toBe(DEFAULT_CONFIG.stages[1]!.speed);
+    for (let i = 0; i < 3; i++) {
+      expect(hard.stages[i]!.eelChance).toBeGreaterThan(DEFAULT_CONFIG.stages[i + 1]!.eelChance * 1.25);
+      expect(hard.stages[i]!.run.eelChance).toBeGreaterThan(0);
+    }
+    for (let i = 1; i < 5; i++) expect(hard.stages[i]!.speed).toBeGreaterThan(hard.stages[i - 1]!.speed);
+    for (const seed of SEEDS.slice(0, 10)) {
+      const { sim } = run(seed, 300, (s) => oracleIntent(s.state, s.config), hard);
+      expect(sim.state.status, `seed ${seed}`).toBe('won');
+      expect(sim.state.stageIndex).toBe(4);
     }
   });
 

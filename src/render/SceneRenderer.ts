@@ -12,6 +12,7 @@ import { Particles } from './Particles';
 import { rasterizeText } from './PixelText';
 import { RippleField } from './RippleField';
 import * as GLSL from './shaders';
+import { LOOKS, type Look, type VisualSettings } from './visuals';
 
 const WATER_LIGHTS = 6;
 const EEL_LIGHTS = 3;
@@ -58,6 +59,10 @@ export interface FrameView {
   readonly drift: number;
   /** The fisherman lifted off the deck, in whole texels (the win cheer). */
   readonly hop: number;
+  /** A speed-up's shimmer on the water: how far down the river its front is (0 far bend .. 1 rail) and its strength. */
+  readonly surge: { front: number; strength: number };
+  /** Whole-frame shake in texels. */
+  readonly shake: { x: number; y: number };
 }
 
 /** How the 3D layer is rendered: at device pixels, or at three pixels per painting texel. */
@@ -99,6 +104,17 @@ export class SceneRenderer {
   pixelsPerTexel = 1;
   /** 0 = full, 1 = 3D layer at 2 px per texel, 2 = 1 px per texel and no bloom. Raised when frames run slow. */
   quality = 0;
+  /** Magnification of the UI items drawn next (the HUD scale setting). */
+  uiZoom = 1;
+  /** The level Auto has settled on; a fixed preset overrides it without forgetting it. */
+  private autoQuality = 0;
+  private preset: VisualSettings['quality'] = 'auto';
+  private resolution = 1;
+  private bloomOn = true;
+  private bloomGain = 1;
+  private look: Look = LOOKS[0] as Look;
+  private readonly surfaceUniforms: Record<string, THREE.IUniform>;
+  private readonly surgeRange: { far: number; near: number };
   /** World position of the fisherman's hands. */
   readonly grip = new THREE.Vector3();
   readonly triangles: { fish: Record<string, number> };
@@ -154,7 +170,7 @@ export class SceneRenderer {
     const gl = this.renderer.getContext();
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     const gpu = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : '';
-    if (/swiftshader|llvmpipe|software/i.test(gpu)) this.quality = 2;
+    if (/swiftshader|llvmpipe|software/i.test(gpu)) this.quality = this.autoQuality = 2;
 
     const { gridW, gridH } = assets;
     this.layout = computeLayout(gridW, gridH, gridW, gridH);
@@ -219,21 +235,20 @@ export class SceneRenderer {
 
     add(this.world, this.quadFull, layer(GLSL.WORLD_FRAG), 0);
     const moonDir = new THREE.Vector3(-0.35, 0.75, 0.55).normalize();
-    add(
-      this.surface,
-      this.quadFull,
-      layer(
-        GLSL.SURFACE_FRAG,
-        {
-          uMoonDir: { value: moonDir },
-          uLights: { value: this.waterLights },
-          uLightColors: { value: this.waterLightColors },
-          uReflect: { value: 1 },
-        },
-        true,
-      ),
-      0,
+    const surface = layer(
+      GLSL.SURFACE_FRAG,
+      {
+        uMoonDir: { value: moonDir },
+        uLights: { value: this.waterLights },
+        uLightColors: { value: this.waterLightColors },
+        uReflect: { value: 1 },
+        uSurge: { value: new THREE.Vector3(0, 1, 0) },
+      },
+      true,
     );
+    this.surfaceUniforms = surface.uniforms;
+    this.surgeRange = { far: river.pointAt(0, 0.5).z, near: river.pointAt(1, 0.5).z };
+    add(this.surface, this.quadFull, surface, 0);
     add(this.surface, this.quadFull, layer(GLSL.OCCLUDER_FRAG), 1);
 
     // Real lights for the 3D actors. Actor space flips z (three looks down -z).
@@ -294,6 +309,7 @@ export class SceneRenderer {
         uTarget: this.shared.uTarget!,
         uRect: { value: new THREE.Vector4() },
         uMap: { value: assets.fisherman },
+        uZoom: { value: 1 },
         uBreath: { value: 0 },
         uLean: { value: 0 },
         uJolt: { value: 0 },
@@ -330,6 +346,10 @@ export class SceneRenderer {
           uGlitch: { value: 0 },
           uWarm: { value: 0 },
           uSource: { value: new THREE.Vector2(1, 1) },
+          uShake: { value: new THREE.Vector2() },
+          uSat: { value: 1 },
+          uTint: { value: new THREE.Vector3(1, 1, 1) },
+          uWash: { value: new THREE.Vector4(1, 1, 1, 0) },
         },
       }),
     );
@@ -350,9 +370,12 @@ export class SceneRenderer {
     // final pass upscales with a sharp-bilinear filter, so painting pixels stay even.
     const capped = Math.max(2, Math.min(scale, Math.floor((scale * 2) / dpr)));
     const wanted = this.options.actors === 'device' ? scale : this.options.actors === '3x' ? Math.min(3, scale) : Math.min(scale, capped);
-    const k = this.quality === 0 ? wanted : Math.min(wanted, this.quality === 1 ? 2 : 1);
+    const byQuality = this.quality === 0 ? wanted : Math.min(wanted, this.quality === 1 ? 2 : 1);
+    // The resolution setting takes a share of that, in whole pixels per texel so the painting stays even.
+    const k = Math.max(1, Math.round(byQuality * this.resolution));
     this.pixelsPerTexel = k;
-    this.bloom.enabled = this.quality < 2;
+    this.bloom.enabled = this.bloomOn && this.quality < 2;
+    this.bloom.strength = 0.55 * this.bloomGain * this.look.bloom;
     const iw = Math.max(1, Math.round((w * k) / scale));
     const ih = Math.max(1, Math.round((h * k) / scale));
     this.renderer.setSize(w, h, false);
@@ -378,10 +401,33 @@ export class SceneRenderer {
 
   /** Step the render quality down one level (slow GPU). Returns false when already at the floor. */
   lowerQuality(): boolean {
-    if (this.quality >= 2) return false;
-    this.quality += 1;
+    if (this.preset !== 'auto' || this.autoQuality >= 2) return false;
+    this.autoQuality += 1;
+    this.quality = this.autoQuality;
     this.resize(true);
     return true;
+  }
+
+  /** Apply the player's picture settings. Cheap to call; only a real change rebuilds the targets. */
+  applyVisuals(v: VisualSettings, look: Look): void {
+    this.preset = v.quality;
+    const quality = v.quality === 'auto' ? this.autoQuality : v.quality === 'low' ? 2 : v.quality === 'medium' ? 1 : 0;
+    const rebuild = quality !== this.quality || v.resolution !== this.resolution;
+    this.quality = quality;
+    this.resolution = v.resolution;
+    this.bloomOn = v.bloom;
+    this.bloomGain = v.bloomIntensity;
+    this.look = look;
+    this.surfaceUniforms.uReflect!.value = v.reflections ? 1 : 0;
+    const u = this.final.uniforms;
+    u.uGrade!.value = look.grade;
+    u.uVignette!.value = look.vignette;
+    u.uSat!.value = look.saturation;
+    (u.uTint!.value as THREE.Vector3).set(...look.tint);
+    (u.uWash!.value as THREE.Vector4).set(...look.wash);
+    this.bloom.enabled = this.bloomOn && this.quality < 2;
+    this.bloom.strength = 0.55 * this.bloomGain * look.bloom;
+    if (rebuild) this.resize(true);
   }
 
   /** Painting-texel position of a point in actor space (three coordinates). */
@@ -428,10 +474,12 @@ export class SceneRenderer {
       item.text = key;
     }
     const rect = item.material.uniforms.uRect!.value as THREE.Vector4;
-    rect.x = Math.round(align === 'center' ? x - rect.z / 2 : align === 'right' ? x - rect.z : x);
+    const zoom = this.uiZoom;
+    rect.x = Math.round(align === 'center' ? x - (rect.z * zoom) / 2 : align === 'right' ? x - rect.z * zoom : x);
     rect.y = Math.round(y);
+    item.material.uniforms.uZoom!.value = zoom;
     item.mesh.visible = true;
-    return rect.z;
+    return rect.z * zoom;
   }
 
   /** A small pixel icon from rows of '#' and '.', placed in target texels. */
@@ -525,6 +573,7 @@ export class SceneRenderer {
       item = { mesh, material, text: '' };
       this.ui.set(id, item);
     }
+    // Panels take their size in screen texels already; only labels and icons are magnified.
     (item.material.uniforms.uRect!.value as THREE.Vector4).set(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
     const [r, g, b] = hexToRgb(hex);
     (item.material.uniforms.uTint!.value as THREE.Vector3).set(r / 255, g / 255, b / 255);
@@ -538,7 +587,15 @@ export class SceneRenderer {
     renderer.info.reset();
     const s = this.shared;
     s.uTime!.value = view.time;
-    s.uNeon!.value = view.neon;
+    s.uNeon!.value = view.neon * this.look.neon;
+    const { far, near } = this.surgeRange;
+    (this.surfaceUniforms.uSurge!.value as THREE.Vector3).set(
+      far + (near - far) * view.surge.front,
+      Math.abs(far - near) * 0.16,
+      view.surge.strength,
+    );
+    const target = s.uTarget!.value as THREE.Vector2;
+    (this.final.uniforms.uShake!.value as THREE.Vector2).set(view.shake.x / target.x, view.shake.y / target.y);
     s.uDarken!.value = view.darken;
     s.uDrift!.value = view.drift;
     s.uFlash!.value = view.flash;
@@ -638,6 +695,7 @@ export class SceneRenderer {
       uniforms: {
         uTarget: this.uiTarget,
         uRect: { value: new THREE.Vector4(0, 0, 1, 1) },
+        uZoom: { value: 1 },
         uMap: { value: map },
         uTint: { value: new THREE.Vector3() },
         uTintMix: { value: 0 },

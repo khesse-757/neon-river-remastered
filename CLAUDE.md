@@ -103,7 +103,7 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 - `npm run build` — typecheck + production build; `postbuild` scans `dist/` for secrets
 - `npm run preview` — serve the build at http://127.0.0.1:4188
 - `npm run check` — lint + typecheck + unit tests + secret scan of tracked files
-- `npm run test` — Vitest suites (`tests/sim/`, `tests/audio/`)
+- `npm run test` — Vitest suites (`tests/sim/`, `tests/audio/`, `tests/game/`)
 - `npm run test:e2e` — Playwright on desktop + mobile projects (`tests/e2e/`): smoke with real input, and
   `audio.spec.ts`, which measures the output level for every `?audition` button and the in-game cues
 - `npm run build:scene` — regenerate palette, re-quantized painting, masks, fisherman from the v1 art
@@ -112,21 +112,24 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
   — captures at exactly 1440×900 and 390×844 through the test hooks (dev server must be running)
 - `npm run inspect:canvas -- --manifest artifacts/evidence.json --url http://127.0.0.1:5188 --seed 42`
   — canvas inspector; then `python3 .claude/skills/threejs-game-director/scripts/check_evidence.py . --manifest artifacts/evidence.json`
-- `npm run playtest -- --oracle 20 --human 60 [--mode zen]` — bot playtest: oracle (perfect information, real net cap)
+- `npm run playtest -- --oracle 20 --human 100 [--mode zen|hard]` — bot playtest: oracle (perfect information, real net cap)
   and human-like (220 ms reaction, aim noise) over fixed seeds; prints win rate, loss causes, time to
   200 lb, the three speed-up times, the longest spawn gap and the pace curve (median lb at 15…180 s),
   and writes `artifacts/playtest.json`
 
 Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
 `phase.<id>`, because the inspector rejects colons; ids: `still-water`, `quickening`, `neon-rapids`,
-`bank-to-bank`), `speed-up` (alias `rest`), `pause`, `settings`, `koi-scoop`, `eel-near`, `eel-basket`,
-`win`, `win-results`, `loss-eel`, `loss-escaped`. Other hooks: `audioLevel()` (RMS at the final
-output), `setAudioBeds(on)`, `soloAudio(name)`, `setWeight(lb)`, `setGameMode('normal'|'zen')`,
-`openAdvancedAudio(open)`.
+`bank-to-bank`; Storm Night adds `storm-surge`, `black-water`), `speed-up` (alias `rest`), `pause`, `settings`,
+`visuals` (settings with Advanced visuals open), `mode-picker` (alias of `title`), `gallery` (the Field Guide),
+`koi-scoop`, `eel-near`, `eel-basket`, `win`, `win-results`, `loss-eel`, `loss-escaped`. Nights started by a hook
+are not written to the player's records. Other hooks: `audioLevel()` (RMS at the final
+output), `setAudioBeds(on)`, `soloAudio(name)`, `setWeight(lb)`, `setGameMode('zen'|'normal'|'hard')`
+(opens a locked mode for the visit), `openAdvancedAudio(open)`, `openAdvancedVisuals(open)`, `setVisuals(patch)`,
+`gallery()` (the open Field Guide's handle: `select(id)`, `setView('original'|'remaster')`, `close()`).
 Dev pages (dev server, or `?debug` on a build): `?tune` (live pace multipliers + copy values), `?audition` (three leitmotif candidates with a
 live level meter; ignores mute and the sound switches; `?theme=lantern|heron|ripple` selects one).
 Look-dev URL params: `?actors=device` (3D layer at full device pixels; default caps it near DPR 2), `?actors=3x`,
-`?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`, `?mode=normal|zen`.
+`?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`, `?mode=zen|normal|hard`.
 
 - `node scripts/record.mjs --url http://127.0.0.1:4188 --out <dir>` — 9 s active-play videos on both
   viewports plus fps / draw-call stats; `--clip full` records a whole bot-played night to the win,

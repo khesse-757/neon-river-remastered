@@ -1,6 +1,8 @@
 import type { LossCause } from '../sim/sim';
 
-export type ButtonName = 'start' | 'resume' | 'retry' | 'home' | 'mode' | 'settings' | 'mute';
+export type ModeButton = `mode-${string}`;
+export type ButtonName = 'start' | 'resume' | 'retry' | 'home' | 'keep' | 'guide' | 'settings' | 'mute' | ModeButton;
+const BUTTONS = ['start', 'resume', 'retry', 'home', 'keep', 'guide', 'settings', 'mute', 'mode-zen', 'mode-normal', 'mode-hard'] as const;
 export type ControlName = ButtonName;
 
 export interface RunSummary {
@@ -17,7 +19,7 @@ export interface TexelRect {
   readonly h: number;
 }
 
-export type OverlayHandlers = Record<ButtonName, () => void>;
+export type OverlayHandlers = Partial<Record<ButtonName, () => void>>;
 
 const el = <T extends HTMLElement>(selector: string): T => {
   const node = document.querySelector<T>(selector);
@@ -38,11 +40,11 @@ export class Overlay {
   private texel = 2;
 
   constructor(handlers: OverlayHandlers) {
-    for (const name of ['start', 'resume', 'retry', 'home', 'mode', 'settings', 'mute'] as const) {
+    for (const name of BUTTONS) {
       const button = el<HTMLButtonElement>(`#btn-${name}`);
       button.addEventListener('click', (event) => {
         event.stopPropagation();
-        handlers[name]();
+        handlers[name]?.();
       });
       button.hidden = true;
       this.controls.set(name, button);
@@ -55,8 +57,21 @@ export class Overlay {
     document.documentElement.style.setProperty('--texel', `${px}px`);
   }
 
-  setGameMode(name: string): void {
-    this.controls.get('mode')?.setAttribute('aria-label', `Game mode: ${name}. Change mode`);
+  /** The element the canvas UI's hit areas live in (the gallery mounts here too). */
+  get host(): HTMLElement {
+    return el<HTMLElement>('#overlay');
+  }
+
+  /** Describe a mode card to screen readers and mark the chosen one. */
+  setModeCard(id: string, label: string, chosen: boolean): void {
+    const button = this.controls.get(`mode-${id}`);
+    if (button?.getAttribute('aria-label') !== label) button?.setAttribute('aria-label', label);
+    if (button?.getAttribute('aria-pressed') !== String(chosen)) button?.setAttribute('aria-pressed', String(chosen));
+  }
+
+  /** Take every control off the screen (another layer, the gallery, owns it for now). */
+  hideAll(): void {
+    for (const control of this.controls.values()) control.hidden = true;
   }
 
   setMuted(muted: boolean): void {
@@ -104,7 +119,7 @@ export class Overlay {
       mode === 'title'
         ? 'Neon River. Catch 200 pounds, do not let 20 pounds escape, never net an electric eel.'
         : mode === 'paused'
-          ? 'Paused. Sound settings.'
+          ? 'Paused. Settings.'
           : mode === 'over'
             ? `${won ? 'A full net. You win.' : summary.cause === 'eel' ? 'An electric eel found your net.' : 'Too many fish slipped away.'} ${summary.caught} pounds caught, ${summary.escaped} escaped.`
             : '';

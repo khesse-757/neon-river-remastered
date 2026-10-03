@@ -15,14 +15,15 @@ const game = new Game(canvas, {
 });
 game.start();
 
-// Dev tools (path editor, lil-gui) never load on the default production path.
-if (import.meta.env.DEV || params.has('debug') || params.has('tune')) {
+// Dev tools (path editor, lil-gui, ?tune, ?audition) load only on the dev server or with ?debug.
+const dev = import.meta.env.DEV || params.has('debug');
+if (dev) {
   (window as unknown as { __neonRiver?: Game }).__neonRiver = game;
   void import('./dev/DevTools').then(({ installDevTools }) => installDevTools(game, params.has('tune')));
 }
 
 // Leitmotif audition page: three candidate themes with play buttons.
-if (params.has('audition')) {
+if (dev && params.has('audition')) {
   void import('./dev/Audition').then(({ installAudition }) => installAudition(game));
 }
 

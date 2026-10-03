@@ -59,21 +59,52 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
   await expectCornerControls(page, 'title');
   const mobile = testInfo.project.name.includes('mobile');
 
-  // The mode button on the title cycles Normal -> Zen -> Normal, changes the rule line's promise and is saved.
+  // The mode picker: three cards. Choosing one is saved; Storm Night is locked until it is earned or the code is entered.
   const press = (selector: string) => (mobile ? page.locator(selector).tap() : page.locator(selector).click());
+  const viewport = page.viewportSize() ?? { width: 390, height: 844 };
   expect((await diag(page))?.gameMode).toBe('normal');
-  await press('#btn-mode');
+  for (const id of ['#btn-mode-zen', '#btn-mode-normal', '#btn-mode-hard', '#btn-start', '#btn-guide']) {
+    const box = (await page.locator(id).boundingBox())!;
+    expect(Math.min(box.width, box.height), id).toBeGreaterThanOrEqual(44);
+  }
+  await press('#btn-mode-zen');
   await expect.poll(async () => (await diag(page))?.gameMode).toBe('zen');
   expect(await page.evaluate(() => localStorage.getItem('neonriver2_mode'))).toBe('zen');
-  await expect(page.locator('#btn-mode')).toHaveAttribute('aria-label', /Zen/);
-  await press('#btn-mode');
+  await expect(page.locator('#btn-mode-zen')).toHaveAttribute('aria-pressed', 'true');
+  await press('#btn-mode-hard');
+  await page.waitForTimeout(150);
+  expect((await diag(page))?.gameMode).toBe('zen');
+  expect((await diag(page))?.hardUnlocked).toBe(false);
+  // Left, left, right, right, left, left, right, right: arrows then Enter, or swipes on touch.
+  const code = [-1, -1, 1, 1, -1, -1, 1, 1];
+  if (mobile) {
+    const y = viewport.height * 0.93;
+    for (const d of code) await touchDrag(page, [viewport.width * 0.5, y], [viewport.width * (0.5 + 0.3 * d), y]);
+  } else {
+    for (const d of code) await page.keyboard.press(d < 0 ? 'ArrowLeft' : 'ArrowRight');
+    await page.keyboard.press('Enter');
+  }
+  await expect.poll(async () => (await diag(page))?.gameMode).toBe('hard');
+  expect((await diag(page))?.hardUnlocked).toBe(true);
+  expect((await diag(page))?.mode).toBe('title');
+  await press('#btn-mode-normal');
   await expect.poll(async () => (await diag(page))?.gameMode).toBe('normal');
+
+  // The Field Guide opens from the title as its own chunk, and Back returns to the title.
+  await press('#btn-guide');
+  await expect.poll(async () => (await diag(page))?.gallery, { timeout: 15_000 }).toBe(true);
+  await expect(page.locator('#gallery')).toBeVisible();
+  await press('#gal-next');
+  await expect(page.locator('#gallery')).toHaveAttribute('data-entry', 'koi');
+  await press('#gal-back');
+  await expect.poll(async () => (await diag(page))?.gallery).toBe(false);
+  await expect(page.locator('#gallery')).toHaveCount(0);
+  expect(await mode(page)).toBe('title');
   if (mobile) await page.locator('#btn-start').tap();
   else await page.locator('#btn-start').click();
   await expect.poll(() => mode(page)).toBe('playing');
 
   // The net answers real input.
-  const viewport = page.viewportSize() ?? { width: 390, height: 844 };
   if (mobile) {
     const y = viewport.height * 0.8;
     await touchDrag(page, [viewport.width * 0.5, y], [viewport.width * 0.15, y]);
@@ -157,6 +188,31 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
   await page.locator('#set-reset').scrollIntoViewIfNeeded();
   await tap('#set-reset');
   await expect.poll(async () => (await diag(page))?.fishNotes).toBe(false);
+
+  // Advanced visuals: expands, every control is a 44 px target, a change applies at once and is saved, reset restores.
+  await page.locator('#set-visuals').scrollIntoViewIfNeeded();
+  await tap('#set-visuals');
+  await expect(page.locator('#set-vis-reset')).toHaveCount(1);
+  const visualSizes = await page
+    .locator('#settings-scroll [id^="set-vis-"]:not(.settings-grip)')
+    .evaluateAll((nodes) => nodes.map((n) => [n.id, n.getBoundingClientRect().width, n.getBoundingClientRect().height] as const));
+  expect(visualSizes.length).toBeGreaterThanOrEqual(14);
+  for (const [id, w, h] of visualSizes) expect(Math.min(w, h), id).toBeGreaterThanOrEqual(44);
+  await page.locator('#set-vis-look').scrollIntoViewIfNeeded();
+  await tap('#set-vis-look');
+  await expect.poll(async () => (await diag(page))?.visuals.look).toBe('vivid');
+  await page.locator('#set-vis-reflections').scrollIntoViewIfNeeded();
+  await tap('#set-vis-reflections');
+  await expect.poll(async () => (await diag(page))?.visuals.reflections).toBe(false);
+  const savedVisuals = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('neonriver2_visuals_v1') ?? '{}') as Record<string, unknown>,
+  );
+  expect(savedVisuals.look).toBe('vivid');
+  expect(savedVisuals.reflections).toBe(false);
+  await page.locator('#set-vis-reset').scrollIntoViewIfNeeded();
+  await tap('#set-vis-reset');
+  await expect.poll(async () => (await diag(page))?.visuals.look).toBe('night');
+  expect((await diag(page))?.visuals.reflections).toBe(true);
   // The whole pause-and-settings screen stays inside the mobile draw-call budget.
   expect((await diag(page))?.renderer.calls ?? 999).toBeLessThan(100);
   await page.locator('#settings-scroll').evaluate((node) => (node.scrollTop = 0));

@@ -619,6 +619,12 @@ export class AudioBus {
     this.crackle(1.0, 0.3);
   }
 
+  /** Distant thunder: a low roll of noise that sinks as it fades. */
+  thunder(): void {
+    if (!this.allowed('thunder')) return;
+    this.noise(2.8, 0.2, 'lowpass', 240, 70, 0.12);
+  }
+
   /** Filtered noise with a swell-and-fade envelope (the rush of a speed-up, the frying basket). */
   private noise(length: number, level: number, type: BiquadFilterType, fromHz: number, toHz: number, attack: number): void {
     const { ctx } = this;
