@@ -514,3 +514,16 @@ wrong. The far layer's parallax was `(net lane - 0.5) * 3` texels plus a slow si
 "camera follows the player" idea, and because the layer moves in whole texels the sky and city
 jumped up to three texels (12 px on a 4x screen) as the net crossed the river. The net term is gone;
 the slow drift stays and CAMERA DRIFT still switches it off.
+
+### After release: the hero GIF's colors
+
+The first hero GIF had two faults. It was recorded before the parallax fix, so the skyline slid with
+the net. And its colors were off: a 64-color palette chosen by pixel count has no room for small
+bright things, so the lantern came out pale yellow (saturation 0.30 against 0.38 in the source) and
+the pink neon reflections went blue. More colors alone did not fit in 5 MB (256 colors: 7.6 MB).
+
+What worked: build the palette in parts. 60 colors from the whole picture, plus 44 reserved from
+crops of the lantern, the reflections, the skyline and the basket, merged into one palette. The
+recording now turns camera drift off, and runs at 12.5 fps instead of 15 (GIF delays are whole
+centiseconds, so "15 fps" was really 14.3 with uneven steps). Result: 4.9 MB, lantern saturation
+back to the source's. Drawing no rain was tried and saved only 4%, so the rain stays.
