@@ -68,8 +68,8 @@ small renderer and is a separate chunk, loaded when the button is pressed.
 
 ### Input (`src/input/Input.ts`)
 
-Turns mouse, keyboard, relative touch drags and a gamepad into one of three intents: a target lane, a direction,
-or nothing. The sim applies the same speed cap to all of them.
+Turns mouse, keyboard, relative touch drags and a gamepad into one of four intents: a target lane (mouse), an axis (keys, gamepad), a
+relative delta (touch drag), or nothing. The sim applies the same speed cap to all of them.
 
 ### Dev tools (`src/dev/`)
 
