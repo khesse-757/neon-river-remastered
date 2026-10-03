@@ -66,6 +66,8 @@ interface ThreeGameTestHooks {
   setWeight(pounds: number): void;
   /** Go to the title screen and choose a game mode (zen, normal, hard); a locked mode is opened for this visit. */
   setGameMode(id: string): void;
+  /** Run game time faster than the clock (tests fast-forward instead of waiting); clamped to 0.1..16. */
+  setTimeScale(scale: number): void;
   /** Expand or collapse the Advanced visuals section of the settings panel. */
   openAdvancedVisuals(open: boolean): void;
   /** Change picture settings (applies live and is saved, like the panel). */

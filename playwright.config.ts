@@ -26,9 +26,22 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 20_000,
   },
+  reporter: process.env.CI ? 'list' : undefined,
   projects: [
     {
+      // The required CI check: one short desktop test, cheapest picture, game time fast-forwarded.
+      name: 'ci',
+      testMatch: /ci\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: SOFTWARE_GL ? undefined : 'chromium',
+        // Small on purpose: CI rasterizes in software, and every frame costs by the pixel.
+        viewport: { width: 420, height: 440 },
+      },
+    },
+    {
       name: 'desktop-chrome',
+      testIgnore: /ci\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         // devices['Desktop Chrome'] sets no channel, so Playwright launches the
@@ -45,6 +58,7 @@ export default defineConfig({
       // own browser download and renders headless without the GPU. Confirm
       // Safari-specific behavior on a real device.
       name: 'mobile-chrome',
+      testIgnore: /ci\.spec\.ts/,
       use: {
         ...devices['iPhone 13'],
         defaultBrowserType: 'chromium',

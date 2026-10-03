@@ -17,12 +17,12 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 - [x] Gate 0 — Design + tech plan approved (2026-10-02)
 - [x] Gate 1 — Look-dev slice: merged as the foundation (PR #1, 2026-10-03). Look NOT approved: too flat and low-res.
 - [x] Gate 1.5 — Art direction v2 + audio: approved by Kyle after round 3; merged (PR #2, 2026-10-03)
-- [ ] Gate 2 — Feature complete (`prompts/02-feature-complete.md`): built on `gate-2/feature-complete`, draft PR #3, awaiting Kyle
+- [x] Gate 2 — Feature complete (`prompts/02-feature-complete.md`): merged (PR #3, 2026-10-03, CI green on b9f6b9c)
 - [ ] Gate 3 — Release (`prompts/03-release.md`)
 
 Working rules changed on 2026-10-03: CLAUDE.md now has a **verification budget (lean mode)**; the playtester agent runs on Sonnet.
 
-## Current state (2026-10-03, Gate 2 on `gate-2/feature-complete`, PR #3 draft)
+## Current state (2026-10-03: Gate 2 merged to `main`; next is the release pass on `gate-3/release`)
 
 ### What Gate 2 added
 
@@ -358,5 +358,5 @@ Fixed after the review (not re-reviewed by the agent; verified by my own capture
 
 ## Next actions
 
-1. Kyle: play Gate 2 on real devices (modes, looks, Field Guide), answer the decisions above.
-2. Then merge PR #3 (ask first) and start `prompts/03-release.md`.
+1. Kyle: answer item 2 (Normal's first 30 s) and item 7 (real-device notes); listen to the rain and thunder.
+2. Start `prompts/03-release.md` on `gate-3/release` when Kyle says so.

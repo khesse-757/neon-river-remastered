@@ -1,0 +1,38 @@
+name: full-e2e
+
+# The whole suite, run by hand before a release: every unit test, then desktop and mobile
+# Playwright (settings, modes, gallery, every audition button, in-game audio levels, the win).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full:
+    name: full-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (all)
+        run: npm run test
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Full Playwright suite
+        run: npm run test:full
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7

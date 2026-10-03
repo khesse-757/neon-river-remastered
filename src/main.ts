@@ -10,6 +10,7 @@ const game = new Game(canvas, {
   actors: params.get('actors'),
   theme: params.get('theme'),
   mode: params.get('mode'),
+  ci: params.has('ci'),
   forceByteRipples: params.get('ripple') === 'byte',
   seed: params.has('seed') ? Number(params.get('seed')) || 1 : undefined,
 });
