@@ -1,6 +1,7 @@
 import type { LossCause } from '../sim/sim';
 
-export type ButtonName = 'start' | 'resume' | 'retry' | 'pause' | 'mute';
+export type ButtonName = 'start' | 'resume' | 'retry' | 'home' | 'mode' | 'settings' | 'mute';
+export type ControlName = ButtonName;
 
 export interface RunSummary {
   readonly cause: LossCause | null;
@@ -16,6 +17,8 @@ export interface TexelRect {
   readonly h: number;
 }
 
+export type OverlayHandlers = Record<ButtonName, () => void>;
+
 const el = <T extends HTMLElement>(selector: string): T => {
   const node = document.querySelector<T>(selector);
   if (!node) throw new Error(`Missing element: ${selector}`);
@@ -26,27 +29,23 @@ const MIN_TOUCH = 44;
 
 /**
  * The accessible layer over the canvas. All visible UI is drawn in the game's pixel grid; these
- * are transparent, focusable buttons placed over that art, plus a live region for screen readers.
+ * are transparent, focusable controls placed over that art, plus a live region for screen readers.
  */
 export class Overlay {
-  private readonly buttons: Record<ButtonName, HTMLButtonElement> = {
-    start: el('#btn-start'),
-    resume: el('#btn-resume'),
-    retry: el('#btn-retry'),
-    pause: el('#btn-pause'),
-    mute: el('#btn-mute'),
-  };
+  private readonly controls = new Map<ControlName, HTMLElement>();
   private readonly status = el<HTMLElement>('#status');
   private readonly probe = el<HTMLElement>('#safe-area');
   private texel = 2;
 
-  constructor(handlers: Record<ButtonName, () => void>) {
-    for (const [name, button] of Object.entries(this.buttons) as [ButtonName, HTMLButtonElement][]) {
+  constructor(handlers: OverlayHandlers) {
+    for (const name of ['start', 'resume', 'retry', 'home', 'mode', 'settings', 'mute'] as const) {
+      const button = el<HTMLButtonElement>(`#btn-${name}`);
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         handlers[name]();
       });
       button.hidden = true;
+      this.controls.set(name, button);
     }
   }
 
@@ -56,16 +55,22 @@ export class Overlay {
     document.documentElement.style.setProperty('--texel', `${px}px`);
   }
 
-  setMuted(muted: boolean): void {
-    this.buttons.mute.setAttribute('aria-pressed', String(muted));
-    this.buttons.mute.setAttribute('aria-label', muted ? 'Sound off. Turn sound on' : 'Sound on. Turn sound off');
+  setGameMode(name: string): void {
+    this.controls.get('mode')?.setAttribute('aria-label', `Game mode: ${name}. Change mode`);
   }
 
-  /** Put a button over its drawn art (target texels), padded out to a 44 px touch target. */
-  place(name: ButtonName, rect: TexelRect | null): void {
-    const button = this.buttons[name];
+  setMuted(muted: boolean): void {
+    const button = this.controls.get('mute');
+    button?.setAttribute('aria-pressed', String(muted));
+    button?.setAttribute('aria-label', muted ? 'Sound off. Turn sound on' : 'Sound on. Turn sound off');
+  }
+
+  /** Put a control over its drawn art (target texels), padded out to a 44 px touch target. */
+  place(name: ControlName, rect: TexelRect | null): void {
+    const control = this.controls.get(name);
+    if (!control) return;
     if (!rect) {
-      if (!button.hidden) button.hidden = true;
+      if (!control.hidden) control.hidden = true;
       return;
     }
     // Pad in whole texels so the hit area and focus ring stay on the pixel grid.
@@ -77,8 +82,8 @@ export class Overlay {
     const w = (rect.w + padX * 2) * t;
     const h = (rect.h + padY * 2) * t;
     const style = `left:${x.toFixed(3)}px;top:${y.toFixed(3)}px;width:${w.toFixed(3)}px;height:${h.toFixed(3)}px`;
-    if (button.getAttribute('style') !== style) button.setAttribute('style', style);
-    if (button.hidden) button.hidden = false;
+    if (control.getAttribute('style') !== style) control.setAttribute('style', style);
+    if (control.hidden) control.hidden = false;
   }
 
   /** Safe-area insets in CSS pixels, read from a probe padded with env(safe-area-inset-*). */
@@ -99,15 +104,15 @@ export class Overlay {
       mode === 'title'
         ? 'Neon River. Catch 200 pounds, do not let 20 pounds escape, never net an electric eel.'
         : mode === 'paused'
-          ? 'Paused.'
+          ? 'Paused. Sound settings.'
           : mode === 'over'
-            ? `${won ? 'A full net.' : summary.cause === 'eel' ? 'An electric eel found your net.' : 'Too many fish slipped away.'} ${summary.caught} pounds caught, ${summary.escaped} escaped.`
+            ? `${won ? 'A full net. You win.' : summary.cause === 'eel' ? 'An electric eel found your net.' : 'Too many fish slipped away.'} ${summary.caught} pounds caught, ${summary.escaped} escaped.`
             : '';
     this.status.textContent = text;
     const focus: ButtonName | null = mode === 'title' ? 'start' : mode === 'paused' ? 'resume' : mode === 'over' ? 'retry' : null;
     // Focus after the next placement so the button is visible.
     requestAnimationFrame(() => {
-      if (focus) this.buttons[focus].focus({ preventScroll: true });
+      if (focus) this.controls.get(focus)?.focus({ preventScroll: true });
       else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     });
   }

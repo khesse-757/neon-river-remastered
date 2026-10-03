@@ -7,4 +7,4 @@
 - Mechanics research: OpenGOAL community decompilation (github.com/open-goal/jak-project)
 - Built with three.js and majidmanzarpour/threejs-game-skills
 - Fonts: Silkscreen (Jason Kottke) and DotGothic16 (Fontworks), both SIL Open Font License 1.1 — licenses in `public/fonts/`. DotGothic16 is subset to Basic Latin.
-- Generated audio (ElevenLabs sound effects, created offline for this game): `public/audio/ambience/night-river-loop.mp3`, `public/audio/sfx/catch-splash-1.mp3`, `public/audio/sfx/catch-splash-2.mp3`
+- Generated audio (ElevenLabs, created offline for this game; sources in `assets-src/audio/`, loudness-normalized copies in `public/audio/`): night-river ambience loop, two catch splashes, the calm koto-and-synth music loop, a koto pluck sample, a chime

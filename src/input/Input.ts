@@ -5,6 +5,10 @@ export interface InputOptions {
   readonly rail: () => { left: number; right: number };
   readonly onPause: () => void;
   readonly onConfirm: () => void;
+  /** Space: pause/resume in play, confirm on menus. */
+  readonly onSpace: () => void;
+  /** Any press on the play surface (used to skip the win sequence). */
+  readonly onTap: () => void;
   readonly onFirstGesture: () => void;
 }
 
@@ -44,6 +48,22 @@ export class Input {
     on('keydown', (e) => {
       this.gesture();
       if (e.repeat) return;
+      // The audition tool is plain DOM over the game; its buttons keep their keys.
+      if (document.getElementById('audition')) return;
+      // Sliders keep their own keys, but pause keys still work from one.
+      if (e.target instanceof HTMLInputElement) {
+        if (PAUSE_KEYS.has(e.code)) {
+          this.options.onPause();
+          e.preventDefault();
+        } else if (e.code === 'Space' && e.target.type === 'range') {
+          this.options.onSpace();
+          e.preventDefault();
+        }
+        return;
+      }
+      // Buttons in the settings list keep Space and Enter for themselves.
+      if (e.target instanceof HTMLButtonElement && e.target.closest('#settings-scroll') && (e.code === 'Space' || e.code === 'Enter'))
+        return;
       if (LEFT_KEYS.has(e.code) || RIGHT_KEYS.has(e.code)) {
         this.held.add(e.code);
         this.device = 'keys';
@@ -51,7 +71,11 @@ export class Input {
       } else if (PAUSE_KEYS.has(e.code)) {
         this.options.onPause();
         e.preventDefault();
-      } else if (e.code === 'Enter' || e.code === 'Space') {
+      } else if (e.code === 'Space') {
+        // Space only ever pauses or resumes during play; it never activates a focused control.
+        this.options.onSpace();
+        e.preventDefault();
+      } else if (e.code === 'Enter') {
         // Buttons handle their own activation; only bare presses start or resume.
         if (!(e.target instanceof HTMLButtonElement)) {
           this.options.onConfirm();
@@ -66,6 +90,7 @@ export class Input {
       'pointerdown',
       (e) => {
         this.gesture();
+        this.options.onTap();
         if (e.pointerType === 'mouse') return;
         // The newest finger takes over, so handing off between thumbs never drops input.
         this.touchId = e.pointerId;

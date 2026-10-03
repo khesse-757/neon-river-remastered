@@ -89,6 +89,84 @@ body {
   touch-action: manipulation;
 }
 
+/* The settings list: a real scrolling box of transparent controls over the drawn panel. */
+#settings-scroll {
+  position: absolute;
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+#settings-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+#settings-scroll[hidden] {
+  display: none;
+}
+
+.settings-inner {
+  position: relative;
+  width: 100%;
+}
+
+/* Pointers use the grip over each slider (see SettingsPanel); the range itself is for keys. */
+#overlay #settings-scroll input[type='range'] {
+  pointer-events: none;
+}
+
+.settings-grip {
+  position: absolute;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+#overlay input[type='checkbox'] {
+  position: absolute;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+
+#overlay input[type='checkbox']:focus-visible {
+  opacity: 1;
+  appearance: none;
+  background: transparent;
+  outline: var(--texel) solid #8ff8ff;
+  outline-offset: calc(var(--texel) * -1);
+}
+
+#overlay input[type='range'] {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: pan-y;
+}
+
+#overlay input[type='range']:focus-visible {
+  opacity: 1;
+  appearance: none;
+  background: transparent;
+  outline: var(--texel) solid #8ff8ff;
+  outline-offset: calc(var(--texel) * -1);
+}
+
+#overlay input[type='range']:focus-visible::-webkit-slider-thumb {
+  appearance: none;
+  width: 1px;
+  height: 1px;
+  background: transparent;
+}
+
+#overlay input[hidden],
 #overlay button[hidden] {
   display: none;
 }

@@ -88,3 +88,249 @@ counted as evidence was just a picture of normal play. All fixed; the two loss
 hooks now throw if they don't reach the state they claim. Still open: at the
 far bend the river is three pixels wide, so you cannot read which lane a fish
 is in until it is a quarter of the way down.
+
+## 2026-10-03 — Gate 1.5: the art pivot ("the painting, in 3D")
+
+Kyle's verdict on Gate 1: the infrastructure is good, the look is not. It was
+faithful but flat and low-res. I had followed the rule "every pixel on one
+grid" to the letter and delivered exactly that: a 216×387 picture with flat
+sprites on it. What he wanted was an _impression_ of the original with fish,
+river and net that read as 3D. The art-direction skill was rewritten (v2) and
+the renderer with it. The sim, input, tests and UI did not change at all, which
+is the argument for keeping the simulation pure.
+
+Media: `docs/media/gate-1.5/` — `v1-vs-gate1-vs-gate1.5.png`,
+`active-play-desktop.webm`, `active-play-mobile.webm`, `koi-scoop-*`,
+`eel-near-*`, `early-phase-*`, `rest-banner-*`,
+`sheet-actors-device-vs-3x-mobile.png`.
+
+### What changed
+
+- The painting stays pixel art, but everything you play with is now a toon-lit
+  3D object: procedural fish (300–500 triangles each, swimming with a spine wave
+  in the vertex shader), a net with a cloth bowl, a glowing hinge and a bamboo
+  pole, a swinging paper lantern that is a real point light, and a basket that
+  fills as you catch — the progress bar is now an object in the world.
+- The river is a real surface: Fresnel reflections that follow the mirrored
+  view ray out to the painted skyline, stepped moon glints, foam along a
+  distance field of the banks, and the painted river bed refracting underneath.
+- Fish sink into depth fog and rise smoothly toward the net. In Gate 1 they
+  popped from "tinted" to "plain sprite"; that was Kyle's first playtest note.
+- Bloom on neon, eels, lantern and the hinge; a palette grade at 18% strength
+  instead of the hard 48-color quantize.
+
+### Numbers
+
+- Gate 1: 18–37 draw calls, 0 triangles that mattered. Gate 1.5: ≤ 70 draw
+  calls, ≤ 5.4k triangles, 58–59 fps at phone resolution on a desktop GPU.
+- Whole renderer rewrite: about 2,000 lines replaced; 0 lines of `src/sim`.
+
+### Audio
+
+- The streak tune used to climb a scale and then sit on its top note. It is now
+  a composed 32-step melody (call and answer) with a 32-step variation, in the
+  key of the music, snapped to the music's eighth notes when a catch lands
+  within 40 ms of one.
+- I measured the generated music instead of trusting the prompt: 80 BPM and
+  D-centred as asked, but the file was 48.065 s and the loop point clicked
+  (the sample jump across the wrap was four times a normal step). Trimmed to
+  exactly 64 beats and added 20 ms fades.
+- The generated "D4" koto note is actually 307.8 Hz (between D and E-flat).
+  The melody repitches from the measured value, not the requested one.
+- The ambience came out of the generator at −33 LUFS; the splashes peaked at
+  −14 and −10 dBFS. Everything is now normalized offline by a script.
+
+### Surprises
+
+- The first v2 frame worked. The hard part had been done in Gate 1: the camera
+  fitted to the painting meant a real 3D net, placed in world units, landed on
+  the painted river at the right size on the first try.
+- A broad `pkill` to stop my dev server also killed the Playwright MCP server.
+  New rule: stop only the PIDs you started.
+
+### Still can't do
+
+- Hear any of it, or run it on a real phone. Frame rates are from a desktop GPU.
+
+### Review round (Gate 1.5)
+
+The reviewer measured what I had only eyeballed: bluegill contrast against the
+water was within ±15 luma levels even right at the net. I had over-corrected
+Kyle's "fish are too bright" note into "fish are invisible". It also caught the
+3D lantern hanging directly over the spot where fish are caught, a basket whose
+"heap of fish" looked like a bucket of water, and pause-screen sliders that
+could not be heard (pausing suspended the audio) or used with arrow keys (the
+game's own key handler ate them). The resolution A/B flipped too: rendering the
+3D layer at 3 px per painted pixel looked bad with a nearest upscale, and fine
+with a sharp-bilinear one — so the cheaper option is now the default.
+
+## 2026-10-03 — Gate 1.5, round 2: pace, a hook, and a win worth chasing
+
+Kyle played it: right look, too slow for too long, and the catch tune was "thin".
+
+### Pace: the arithmetic that sets everything
+
+- Before: first fish reached the net at 6.7 s (2 s rest + first spawn + 4.2 s
+  swim). After: 1.65 s, because the river starts with fish already in it.
+- Rests went from 2 s to 0.75 s, travel from 4.2 s to a ramp of 3.0 → 1.9 s.
+- The surprise: measured in pounds, the old build was already _on_ Kyle's pace
+  targets (53 lb at 0:40, 104 at 1:15). It felt slow because of dead time and
+  slow fish, not because weight arrived slowly.
+- Kyle asked for a spawn period of 0.28 s by the end. It can't be done with the
+  other rules: only 20 lb may escape, so a winner has caught nearly everything
+  that spawned, so the target "200 lb at 2:15" fixes how much may spawn — about
+  1.55 lb/s. More catchable fish just ends the night sooner. A test run at
+  0.28 s dropped the human-like bot's win rate from 61% to 3.5%. The honest
+  levers are speed, sweep, and eels (they weigh nothing). The table stops at
+  0.42 s and 46–66% eels late; there is a `?tune` panel to feel the alternative.
+
+### Bots found my bugs, and I found theirs
+
+- The oracle bot now wins 100 of 100 seeds without touching an eel.
+- My first "human-like" bot lost every single run to eels. The cause was mine:
+  when boxed in it "fled" to the nearer edge of the eel's lane, which was
+  sometimes _across_ the eel. A second bug: it aimed for the very edge of the
+  catch radius to save travel, so 3% aim noise turned catches into misses.
+- An attempt to make the planner smarter (fall back to tighter margins, follow
+  its own best path) made it oscillate between two plans and die more. Reverted.
+
+### The melody
+
+- Three original motifs to choose from, each stated by a start sting, quoted by
+  the phase stinger, turned into a fanfare for the win and sunk to the low
+  tonic for a loss. Since I can't hear, there is an `?audition` page.
+- Reviewer catch: the very first sting played before the koto sample had
+  decoded, so the first thing a player heard was the fallback synth.
+
+### The win
+
+- First version was thin next to the eel shock (the reviewer's words). The
+  "paper lanterns" were yellow dots, and koi leaping in celebration froze in
+  mid-air when the results card appeared. Now: a gold wash, pixel-art lanterns,
+  bigger fireworks, a cheering fisherman, and effects that carry on behind the
+  card.
+
+Media: `docs/media/gate-1.5/` — `full-run-desktop.webm`, `full-run-mobile.webm`
+(a whole bot-played night to the win), `eel-basket-*.webm`, `win-*`,
+`win-results-*`, `eel-basket-*`, `eel-storm-*`, `title-settings-*`.
+
+## 2026-10-03 — Gate 1.5, round 3: the dance, and a quieter river
+
+Kyle's verdict on round 2: the look is close, but the fish pattern "feels
+disjointed and jagged, with too much down time", the catch melody clashes with
+the music, and the `?audition` page plays nothing at all on his Mac.
+
+### The audition page was silent because of a mute button
+
+- I could not hear it either way, so I measured it: a Playwright script taps
+  everything that reaches the output with an AnalyserNode and prints RMS.
+  Fresh profile: 0.33. Saved mute: 0.0000. Fish Notes switched off: only the
+  music bed (0.05–0.14), no motif.
+- Root cause: the audition page played the motifs through the same master mute
+  and the same Fish Notes switch as the game. Kyle had found the catch melody
+  grating, so he had very likely turned exactly those off, and then the page
+  built for choosing a melody could not play one. "Use this one" still
+  registered because it only writes a setting.
+- Fix: the page now plays at default levels whatever the saved mix says, has a
+  live output meter, and the same measurement is a permanent test: Playwright
+  clicks all 18 buttons with a fresh profile and with everything muted and
+  zeroed, and checks the output level for each; then does the same in the game
+  for the start sting, a catch, the eel shock and the win fanfare. "I can't
+  hear it" stops being a reason for audio to go unverified.
+
+### The fish pattern: measure "jagged" first
+
+The playtester agent put numbers on the complaint before I touched anything:
+
+|                                             | Before                                  | After                                                    |
+| ------------------------------------------- | --------------------------------------- | -------------------------------------------------------- |
+| Lane step between consecutive fish (median) | 0.26 widths                             | 0.22                                                     |
+| Steps of 0.30 widths or more                | 44%                                     | 26% overall, 3% in Still Water                           |
+| Direction reversals per 10 spawns           | 6.4                                     | 4.7 overall, 2.2 in Still Water (the turns at the banks) |
+| Longest gap without a spawn                 | 2.1 s (ten times a night, at the rests) | the stage's own period: 0.9 → 0.5 s                      |
+| Seconds per night with nothing near the net | 9.3                                     | 0.55                                                     |
+| Eel warnings with no eel                    | ~4.7 per night                          | 0 (a warning is cancelled if a guard removes the eel)    |
+
+(Before and after were both measured by the playtester agent on the same seeds.
+The smooth part is the first half of the night; Neon Rapids and the sweep part
+of Bank to Bank are deliberately about as jumpy as the old game was all night.)
+
+- The old emitter was a linear ping-pong with random swing lengths, plus a
+  fairness guard that moved fish 0.4 widths sideways when an eel was nearby.
+  Two thirds of all spawns reversed direction. That is scatter, not a chain.
+- New director: one emitter moving in eased swings. In Still Water that is a
+  plain sine, bank to bank. Three speed-ups (40 / 90 / 140 lb, or the clock)
+  add speed, density, shorter swings and sudden reversals. The last stage,
+  Bank to Bank, pins a burst of fish at one bank and then jumps to the other.
+- No rests, no phases. A speed-up is an event, not a pause. One detail that
+  mattered: fish used to keep the speed they were born with, so a speed-up
+  made new fish catch up with old ones and bunch. Now the whole river has one
+  current and every fish speeds up together.
+
+### The same arithmetic, a third time
+
+Kyle asked for no spawn gap longer than ~0.5 s, koi at 8%, eels at 5%, and a
+2:00–2:30 win. Those cannot all hold: 8% koi and 5% eels is 1.27 lb per spawn,
+so a spawn every 0.5 s is 2.5 lb/s and the first speed-up arrives at 0:18, the
+win around 1:20. My first table did exactly that (median win 1:45). I kept the
+win time and the Still Water mix, and let the period be what the budget allows:
+0.9 s in Still Water, tightening to 0.5 s in Bank to Bank, where almost half
+the spawns are eels and weigh nothing. What was really "down time" before was
+the rests, and those are gone.
+
+A surprise while tuning: the human-like bot's win rate fell off a cliff
+between a 0.50 s and a 0.47 s period in the last stage (58% → 24%), almost all
+of it eel losses. Half a second is where a 220 ms reaction and a 0.6 s eel
+warning stop being enough.
+
+### Calming the audio
+
+- Fish Notes are off by default. A catch is a splash and a 120 ms sine chime
+  on the tonic or the fifth, which sits inside every chord of the bed.
+- The spawn tick is gone; the eel warning and near-miss crackle are softer.
+- Clicks: several voices started at full level (the pluck, the zap, the fry
+  noise, every plain tone) and cues were cut with a hard `stop()`. Every voice
+  now has an attack and a decay, cues fade, duplicates within 45 ms play once,
+  and at most 16 one-shot voices sound at a time.
+- Samples are fetched and decoded with an OfflineAudioContext while the title
+  screen loads, before any gesture, so the first sting is the real instrument.
+
+### One quad instead of forty
+
+The pause panel sat at exactly 100 draw calls because every label, box and
+slider part was its own quad and texture. Advanced audio needed about 25 more
+rows. The settings list is now drawn on a 2D canvas at one pixel per texel and
+shown as a single quad, over a real, natively scrolling DOM list of
+transparent form controls. Touch scrolling, keyboard focus and screen readers
+come for free, and the pause screen dropped to 72 draw calls.
+
+### Asked for, then removed
+
+Kyle asked for a neon surge at each speed-up and a pulse on the score tablet.
+After playing the build he asked for both to go: distracting.
+The speed-up is now its stinger, its sign and some quiet streaks of current.
+The cheapest playtest is still the owner playing it.
+
+### Round 3b: he played it, and asked for the thing the original had
+
+Kyle's note after playing: "They are always evenly spaced in time." He was
+right, and it was my fix for "down time" that did it: one fixed period per
+stage. The original's stream is not a metronome. It comes in snaking chains
+that speed up under your net.
+
+- **S-runs.** A run is 8–13 one-pound fish laid down bank to bank, with the
+  gap between fish shrinking and the sweep quickening as it goes. Every
+  speed-up brings one, so the river is accelerating while you are in the
+  middle of a chain. Later in the night an eel is planted in the S.
+- Between runs the gaps wander by ±30%.
+- The budget still rules: a run delivers 2–3.5 fish a second, so the water
+  between runs had to get sparser (mean gap 0.90 → 1.02 s in Still Water) to
+  keep the win at about 2:09. Time with nothing near the net went from 0.55 s
+  back up to about 7 s a night. That is the trade: rhythm instead of a drip.
+- Two rounds ago the fairness guard moved eels sideways when fish were close in
+  time, which made scatter. Now an eel simply keeps 0.38 s from its neighbours
+  in time, so nothing is ever moved.
+- **Modes.** Zen is the same night with the eels taken out. Taking them out
+  left holes: late in the night half the stream is eels, and the first version
+  had 6-second stretches of empty river. Now an eel's place is left empty only
+  if the place before it was not.

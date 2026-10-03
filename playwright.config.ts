@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// PW_SOFTWARE_GL=1 runs the bundled headless shell (SwiftShader), like the CI runners do.
+const SOFTWARE_GL = Boolean(process.env.PW_SOFTWARE_GL);
+
 export default defineConfig({
   testDir: './tests/e2e',
   // One worker: parallel headless WebGL contexts contend for the GPU, and the
@@ -32,7 +35,7 @@ export default defineConfig({
         // bundled headless shell, which has no GPU backend and falls back to
         // SwiftShader (CPU) — roughly 4x slower raster and meaningless FPS.
         // The full Chromium build renders headless on the real GPU.
-        channel: 'chromium',
+        channel: SOFTWARE_GL ? undefined : 'chromium',
         viewport: { width: 1280, height: 720 },
       },
     },
@@ -45,7 +48,7 @@ export default defineConfig({
       use: {
         ...devices['iPhone 13'],
         defaultBrowserType: 'chromium',
-        channel: 'chromium',
+        channel: SOFTWARE_GL ? undefined : 'chromium',
       },
     },
   ],

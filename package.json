@@ -19,7 +19,8 @@
     "build:scene": "node scripts/build-scene.mjs",
     "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs",
     "verify:visual": "playwright test tests/e2e/smoke.spec.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "playtest": "tsx scripts/playtest.ts"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",
@@ -38,6 +39,7 @@
     "lint-staged": "^17.6.0",
     "pngjs": "^7.0.0",
     "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.0",
     "vite": "^8.0.13",

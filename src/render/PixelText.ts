@@ -51,3 +51,26 @@ export function rasterizeText(text: string, color: readonly [number, number, num
   texture.needsUpdate = true;
   return { texture, width, height };
 }
+
+const bitmaps = new Map<string, HTMLCanvasElement>();
+
+/**
+ * The same thresholded pixel text as a small canvas, for UI that is composed on a 2D canvas (the
+ * settings sheet) instead of one quad per label. Cached per string and color.
+ */
+export function textCanvas(text: string, hex: string, title = false): HTMLCanvasElement {
+  const key = `${title ? 'T' : 'B'}|${hex}|${text}`;
+  let canvas = bitmaps.get(key);
+  if (canvas) return canvas;
+  const n = parseInt(hex.slice(1), 16);
+  const bitmap = rasterizeText(text, [(n >> 16) & 255, (n >> 8) & 255, n & 255], title);
+  canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const data = new ImageData(new Uint8ClampedArray(bitmap.texture.image.data as Uint8Array), bitmap.width, bitmap.height);
+  canvas.getContext('2d')?.putImageData(data, 0, 0);
+  bitmap.texture.dispose();
+  if (bitmaps.size > 400) bitmaps.clear();
+  bitmaps.set(key, canvas);
+  return canvas;
+}

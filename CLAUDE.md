@@ -1,6 +1,6 @@
 # CLAUDE.md — Neon River (Remaster)
 
-A pixel-art arcade fishing game inspired by the Jak and Daxter fishing
+A pixel-art-world arcade fishing game with stylized 3D actors, inspired by the Jak and Daxter fishing
 minigame, rebuilt on three.js. Catch 200 lb, let no more than 20 lb escape,
 never net an electric eel. Plays on phones (portrait) and desktop browsers.
 
@@ -9,8 +9,8 @@ never net an electric eel. Plays on phones (portrait) and desktop browsers.
 1. `docs/design/REMASTER_BRIEF.md` — what we're building and why (source of truth)
 2. `docs/design/ORIGINAL_FISHING_DESIGN.md` — how the original minigame's fish
    patterns and pacing work
-3. `.claude/skills/neon-river-art-direction/SKILL.md` — pixel-art rules that
-   override the threejs-* skills wherever they conflict
+3. `.claude/skills/neon-river-art-direction/SKILL.md` — art direction v2 (painted
+   pixel world + toon-lit 3D actors); overrides the threejs-* skills where they conflict
 4. `artifacts/game-progress.md` — current state, decisions, next actions
 5. `reference/original/` — Neon River v1 (Canvas 2D). Read-only reference.
    Port ideas and sprite data from it; never import from it.
@@ -77,6 +77,7 @@ say what ran.
 - Run the game yourself: start the dev server in the background, drive it with
   the test hooks / canvas inspector or the Playwright MCP browser, and look at
   the screenshots. Stop servers you start.
+- Never use broad `pkill`/`killall`; stop only the PIDs you started.
 - `.claude/loop.md` is the default `/loop` prompt (CI babysitting + next action).
 
 ## Journaling for the blog
@@ -91,16 +92,33 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 - `npm run build` — typecheck + production build; `postbuild` scans `dist/` for secrets
 - `npm run preview` — serve the build at http://127.0.0.1:4188
 - `npm run check` — lint + typecheck + unit tests + secret scan of tracked files
-- `npm run test` — Vitest sim suite (`tests/sim/`)
-- `npm run test:e2e` — Playwright smoke on desktop + mobile projects (`tests/e2e/`), real input
+- `npm run test` — Vitest suites (`tests/sim/`, `tests/audio/`)
+- `npm run test:e2e` — Playwright on desktop + mobile projects (`tests/e2e/`): smoke with real input, and
+  `audio.spec.ts`, which measures the output level for every `?audition` button and the in-game cues
 - `npm run build:scene` — regenerate palette, re-quantized painting, masks, fisherman from the v1 art
   (`scripts/build-scene.mjs` + `scripts/masks.json`); inspect `artifacts/scene-debug/` afterwards
 - `node scripts/capture.mjs --out <dir> --state <hook-state> [--query "grid=216x387&fish=voxel"] [--frames N]`
   — captures at exactly 1440×900 and 390×844 through the test hooks (dev server must be running)
 - `npm run inspect:canvas -- --manifest artifacts/evidence.json --url http://127.0.0.1:5188 --seed 42`
   — canvas inspector; then `python3 .claude/skills/threejs-game-director/scripts/check_evidence.py . --manifest artifacts/evidence.json`
-- Bot playtest: not built yet (Gate 2). `src/sim/bots/tracker.ts` is only a capture/smoke helper.
+- `npm run playtest -- --oracle 20 --human 60 [--mode zen]` — bot playtest: oracle (perfect information, real net cap)
+  and human-like (220 ms reaction, aim noise) over fixed seeds; prints win rate, loss causes, time to
+  200 lb, the three speed-up times, the longest spawn gap and the pace curve (median lb at 15…180 s),
+  and writes `artifacts/playtest.json`
 
 Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
-`phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `loss-eel`, `loss-escaped`.
-Look-dev URL params: `?grid=192x344|216x387|256x459|384x688`, `?fish=voxel`, `?ripple=byte`, `?seed=N`.
+`phase.<id>`, because the inspector rejects colons; ids: `still-water`, `quickening`, `neon-rapids`,
+`bank-to-bank`), `speed-up` (alias `rest`), `pause`, `settings`, `koi-scoop`, `eel-near`, `eel-basket`,
+`win`, `win-results`, `loss-eel`, `loss-escaped`. Other hooks: `audioLevel()` (RMS at the final
+output), `setAudioBeds(on)`, `soloAudio(name)`, `setWeight(lb)`, `setGameMode('normal'|'zen')`,
+`openAdvancedAudio(open)`.
+Dev pages: `?tune` (live pace multipliers + copy values), `?audition` (three leitmotif candidates with a
+live level meter; ignores mute and the sound switches; `?theme=lantern|heron|ripple` selects one).
+Look-dev URL params: `?actors=device` (3D layer at full device pixels; default caps it near DPR 2), `?actors=3x`,
+`?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`, `?mode=normal|zen`.
+
+- `node scripts/record.mjs --url http://127.0.0.1:4188 --out <dir>` — 9 s active-play videos on both
+  viewports plus fps / draw-call stats; `--clip full` records a whole bot-played night to the win,
+  `--clip eel` the eel shock and frying basket (run against `npm run preview` for performance numbers).
+  Videos are re-encoded to `.mp4` (H.264, plays in QuickTime) when ffmpeg is installed
+- `node scripts/normalize-audio.mjs` — loudness-normalize `assets-src/audio/*` into `public/audio/` (needs ffmpeg)

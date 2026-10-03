@@ -7,7 +7,7 @@ import type { RiverData } from '../sim/river';
  * Dev-only: lil-gui tuning plus a path editor drawn over the game. Drag bank points to refit the
  * river to the painting, then "export" to copy JSON for src/data/river.ts.
  */
-export function installDevTools(game: Game): void {
+export function installDevTools(game: Game, openTune = false): void {
   const data = structuredClone(RIVER) as { -readonly [K in keyof RiverData]: RiverData[K] };
   const banks = data.banks.map((b) => [...b]) as [number, number, number, number][];
   const camera = { ...data.camera };
@@ -16,7 +16,6 @@ export function installDevTools(game: Game): void {
     lanes: true,
     speedProfile: data.speedProfile,
     laneMargin: data.laneMargin,
-    fish: game.view?.fishStyle ?? 'flat',
   };
 
   const editor = document.createElement('canvas');
@@ -121,15 +120,59 @@ export function installDevTools(game: Game): void {
 
   const gui = new GUI({ title: 'Neon River dev' });
   gui.close();
-  gui
-    .add(state, 'editor')
-    .name('path editor')
-    .onChange((on: boolean) => (editor.style.display = on ? 'block' : 'none'));
-  gui.add(state, 'lanes').name('lanes + hitboxes');
-  gui
-    .add(state, 'fish', ['flat', 'voxel'])
-    .name('fish style')
-    .onChange((v: 'flat' | 'voxel') => game.setFishStyle(v));
+
+  // ?tune: live pace multipliers. On its own it is a compact strip docked in the top-right corner,
+  // over the sky: even open it never reaches the net, on a small phone or in landscape. It starts
+  // collapsed to its title bar and collapses again as soon as the game is touched.
+  const tune = { ...game.config.tune, values: '' };
+  const tuneGui = openTune ? new GUI({ title: 'tune pace', autoPlace: false, width: 320 }) : gui.addFolder('tune (pace)');
+  if (openTune) {
+    gui.hide();
+    const style = document.createElement('style');
+    style.textContent =
+      '#tune-dock{position:fixed;right:env(safe-area-inset-right,0);top:env(safe-area-inset-top,0);z-index:15;max-width:calc(100vw - 104px)}' +
+      '#tune-dock .lil-gui{--widget-height:26px;--spacing:3px;--font-size:12px;--input-font-size:12px;--name-width:34%;width:min(300px,calc(100vw - 104px));max-height:42vh;overflow-y:auto}' +
+      '#tune-dock .lil-gui .lil-controller{min-height:28px}';
+    const dock = document.createElement('div');
+    dock.id = 'tune-dock';
+    dock.append(tuneGui.domElement);
+    document.head.append(style);
+    document.body.append(dock);
+    window.addEventListener(
+      'pointerdown',
+      (event) => {
+        if (!dock.contains(event.target as Node)) tuneGui.close();
+      },
+      true,
+    );
+  }
+  const show = (): void => {
+    const { speed, density, sweep, eel } = tune;
+    tune.values = JSON.stringify({ speed, density, sweep, eel });
+    game.setTune({ speed, density, sweep, eel });
+    valuesField.updateDisplay();
+  };
+  tuneGui.add(tune, 'speed', 0.5, 2, 0.05).name('speed x').onChange(show);
+  tuneGui.add(tune, 'density', 0.5, 2, 0.05).name('density x').onChange(show);
+  tuneGui.add(tune, 'sweep', 0.25, 2, 0.05).name('sweep x').onChange(show);
+  tuneGui.add(tune, 'eel', 0, 2, 0.05).name('eel x').onChange(show);
+  const valuesField = tuneGui.add(tune, 'values').name('values');
+  tuneGui
+    .add(
+      {
+        copy: () => {
+          show();
+          // Clipboard needs a secure context; on a LAN dev URL the field above can be selected instead.
+          void navigator.clipboard?.writeText(tune.values).catch(() => undefined);
+        },
+      },
+      'copy',
+    )
+    .name('copy values');
+  show();
+  // Starts collapsed to its title bar; tap it to open.
+  if (openTune) tuneGui.close();
+
   const river = gui.addFolder('river fit');
   river.add(camera, 'focal', 600, 2000, 10).onFinishChange(apply);
   river.add(camera, 'horizonY', 0, 300, 1).onFinishChange(apply);

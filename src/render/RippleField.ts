@@ -65,6 +65,15 @@ export class RippleField {
     return this.targets[0].texture;
   }
 
+  /** Smooth sampling for per-pixel water shading. */
+  setLinear(): void {
+    for (const target of this.targets) {
+      target.texture.magFilter = THREE.LinearFilter;
+      target.texture.minFilter = THREE.LinearFilter;
+      target.texture.needsUpdate = true;
+    }
+  }
+
   /** Queue an impulse at a painting-grid position. */
   inject(x: number, y: number, radius: number, strength: number): void {
     if (this.queue.length < 32) this.queue.push(new THREE.Vector4(x, y, radius, strength));

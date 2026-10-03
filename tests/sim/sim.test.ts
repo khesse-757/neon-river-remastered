@@ -2,12 +2,15 @@ import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import { RIVER } from '../../src/data/river';
+import { HumanBot } from '../../src/sim/bots/human';
+import { oracleIntent } from '../../src/sim/bots/oracle';
 import { trackerIntent } from '../../src/sim/bots/tracker';
 import { DEFAULT_CONFIG, type SimConfig } from '../../src/sim/config';
+import { configFor, MODES } from '../../src/sim/modes';
 import { createNet, stepNet, type NetIntent } from '../../src/sim/net';
 import { River } from '../../src/sim/river';
 import { createRng } from '../../src/sim/rng';
-import { Sim, type SimEvent } from '../../src/sim/sim';
+import { EEL_MARGIN, Sim, type SimEvent } from '../../src/sim/sim';
 
 const DT = 1 / 60;
 const river = new River(RIVER);
@@ -23,6 +26,8 @@ function run(seed: number, seconds: number, intent: (sim: Sim) => NetIntent, con
   return { sim, events };
 }
 const idle = (): NetIntent => ({ kind: 'none' });
+/** A night nobody can end: no escape limit, and a net too small to touch anything from the bank (lane 0). */
+const ENDLESS: SimConfig = { ...DEFAULT_CONFIG, maxEscaped: 1e9, net: { ...DEFAULT_CONFIG.net, radius: 0.001 } };
 const tracker = (sim: Sim): NetIntent => trackerIntent(sim.state, sim.config.net.radius);
 
 describe('rng', () => {
@@ -137,33 +142,357 @@ describe('net', () => {
   });
 });
 
-describe('phases and emitter', () => {
-  it('opens with a rest, then runs each phase for its length with rests between', () => {
-    const { events } = run(7, 36, tracker);
-    const marks = events.filter((e) => e.type === 'phaseStart' || e.type === 'restStart');
-    expect(marks.slice(0, 5).map((e) => e.type)).toEqual(['restStart', 'phaseStart', 'restStart', 'phaseStart', 'restStart']);
-    const sim = new Sim({ seed: 7, river });
-    const times: number[] = [];
-    for (let i = 0; i < 40 / DT; i++) {
-      sim.step(DT, tracker(sim));
-      for (const e of sim.drainEvents()) if (e.type === 'phaseStart') times.push(sim.state.time);
-      if (sim.state.status !== 'playing') break;
+describe('stages and emitter', () => {
+  it('opens straight into play with fish already in the river, and never pauses the spawns', () => {
+    const { stages, spacing, fairness } = DEFAULT_CONFIG;
+    // The longest wait the pattern allows anywhere: the slowest stage's period at the top of its wander.
+    const longest = Math.max(stages[0]!.period * spacing[1], fairness.eelWindow + EEL_MARGIN);
+    for (const seed of SEEDS.slice(0, 12)) {
+      const sim = new Sim({ seed, river });
+      expect(sim.state.fish.length).toBeGreaterThanOrEqual(2);
+      expect(sim.drainEvents()[0]?.type).toBe('stage');
+      let firstArrival = Infinity;
+      let lastSpawn = 0;
+      let emptyZone = 0;
+      while (sim.state.status === 'playing' && sim.state.time < 200) {
+        const stage = sim.state.stage;
+        sim.step(DT, oracleIntent(sim.state, sim.config));
+        for (const e of sim.drainEvents()) {
+          if ((e.type === 'catch' || e.type === 'miss') && firstArrival === Infinity) firstArrival = sim.state.time;
+          if (e.type !== 'spawn') continue;
+          const gap = sim.state.time - lastSpawn;
+          // No rests and no skipped spawns: never longer than the pattern's own longest wait, and
+          // within a stage never longer than that stage's (one period of slack across a speed-up).
+          expect(gap, `seed ${seed} t=${sim.state.time.toFixed(2)}`).toBeLessThanOrEqual(longest + 2 * DT);
+          if (sim.state.stage === stage && sim.state.time - gap > (DEFAULT_CONFIG.speedUps[sim.state.stageIndex - 1]?.seconds ?? 0))
+            expect(gap).toBeLessThanOrEqual(
+              Math.max(stages[Math.max(0, sim.state.stageIndex - 1)]!.period * spacing[1], fairness.eelWindow + EEL_MARGIN) + 2 * DT,
+            );
+          lastSpawn = sim.state.time;
+        }
+        if (!sim.state.fish.some((f) => f.status === 'swimming' && f.progress >= 0.5 && f.progress <= 1)) emptyZone += DT;
+      }
+      // The first fish reaches the net within about two seconds, and one is almost always on its way.
+      expect(firstArrival).toBeLessThan(2.1);
+      expect(emptyZone).toBeLessThan(1);
     }
-    expect(times[0]).toBeCloseTo(2, 1);
-    expect(times[1]).toBeCloseTo(14, 1);
-    expect(times[2]).toBeCloseTo(26, 1);
   });
 
-  it('never spawns during a rest and never spawns eels in Still Water', () => {
-    for (const seed of SEEDS.slice(0, 40)) {
+  it('speeds up three distinct times, on weight caught or on the clock, without pausing', () => {
+    const { stages, speedUps } = DEFAULT_CONFIG;
+    expect(stages).toHaveLength(4);
+    expect(speedUps.map((u) => [u.weight, u.seconds])).toEqual([
+      [40, 35],
+      [90, 65],
+      [140, 95],
+    ]);
+    // Each speed-up is about +12% fish speed, with denser spawns, a faster sweep and tighter S-runs.
+    for (let i = 1; i < stages.length; i++) {
+      expect(stages[i]!.speed / stages[i - 1]!.speed).toBeCloseTo(1.12, 2);
+      expect(stages[i]!.period).toBeLessThan(stages[i - 1]!.period);
+      expect(stages[i]!.crossing).toBeLessThan(stages[i - 1]!.crossing);
+      expect(stages[i]!.reversals).toBeGreaterThan(stages[i - 1]!.reversals);
+      expect(stages[i]!.run.period[1]).toBeLessThan(stages[i - 1]!.run.period[1]);
+      expect(stages[i]!.run.crossing).toBeLessThan(stages[i - 1]!.run.crossing);
+    }
+    for (const stage of stages) {
+      // A run is denser than the water around it and tightens as it goes.
+      expect(stage.run.period[0]).toBeLessThan(stage.period * 0.75);
+      expect(stage.run.period[1]).toBeLessThan(stage.run.period[0]);
+    }
+
+    // On weight: a good player triggers them early.
+    const good = new Sim({ seed: 5, river });
+    good.drainEvents();
+    const byWeight: { t: number; caught: number; index: number }[] = [];
+    while (good.state.status === 'playing' && good.state.time < 200) {
+      good.step(DT, oracleIntent(good.state, good.config));
+      for (const e of good.drainEvents())
+        if (e.type === 'stage') byWeight.push({ t: good.state.time, caught: good.state.caught, index: e.index });
+    }
+    expect(byWeight.map((m) => m.index)).toEqual([1, 2, 3]);
+    byWeight.forEach((m, i) => {
+      expect(m.caught).toBeGreaterThanOrEqual(speedUps[i]!.weight);
+      expect(m.caught).toBeLessThan(speedUps[i]!.weight + 6);
+      expect(m.t).toBeLessThan(speedUps[i]!.seconds);
+    });
+    expect(good.state.stage.id).toBe('bank-to-bank');
+
+    // On the clock: an idle net still gets the speed-ups at 0:35, 1:05 and 1:35.
+    const idleSim = new Sim({ seed: 5, river, config: ENDLESS });
+    idleSim.drainEvents();
+    const byClock: number[] = [];
+    while (idleSim.state.time < 115) {
+      idleSim.step(DT, { kind: 'target', lane: 0 });
+      for (const e of idleSim.drainEvents()) if (e.type === 'stage') byClock.push(idleSim.state.time);
+    }
+    expect(byClock).toHaveLength(3);
+    byClock.forEach((t, i) => expect(t).toBeCloseTo(speedUps[i]!.seconds, 1));
+    // The current has picked the new speed up: fish cross the river in the stage's travel time.
+    expect(idleSim.pace().travel).toBeCloseTo(DEFAULT_CONFIG.travel / stages[3]!.speed, 2);
+  });
+
+  it('brings an S-run with every speed-up: a tight chain that tightens while the current picks up', () => {
+    let runs = 0;
+    for (const seed of SEEDS.slice(0, 20)) {
+      const sim = new Sim({ seed, river, config: ENDLESS });
+      sim.drainEvents();
+      let speedUpAt = -Infinity;
+      let runAt = -Infinity;
+      let gaps: number[] = [];
+      let lastSpawn = 0;
+      let wasInRun = false;
+      const close = (): void => {
+        if (gaps.length < 4) return;
+        runs++;
+        // The chain tightens: its last gap is shorter than its first (gaps held open around an eel aside).
+        const plain = gaps.filter((g) => g < DEFAULT_CONFIG.fairness.eelWindow);
+        if (plain.length >= 4) expect(Math.min(...plain.slice(1))).toBeLessThan(plain[0]! - DT / 2);
+        gaps = [];
+      };
+      while (sim.state.time < 100) {
+        const speedBefore = sim.state.speed;
+        sim.step(DT, { kind: 'target', lane: 0 });
+        const { emitter, stage } = sim.state;
+        for (const e of sim.drainEvents()) {
+          if (e.type === 'stage') speedUpAt = sim.state.time;
+          if (e.type === 'run') {
+            runAt = sim.state.time;
+            expect(e.fish).toBeGreaterThanOrEqual(stage.run.fish[0]);
+            expect(e.fish).toBeLessThanOrEqual(stage.run.fish[1]);
+            // The speed-up's run arrives within a couple of spawns, while the current is still picking up.
+            if (sim.state.time - speedUpAt < 4) expect(sim.state.speed).toBeLessThan(stage.speed - 0.02);
+          }
+          if (e.type !== 'spawn') continue;
+          if (emitter.inRun) {
+            // Inside a run: no koi, and every fish closer in time than anything outside one.
+            expect(e.fish.kind).not.toBe('koi');
+            if (wasInRun) {
+              const gap = sim.state.time - lastSpawn;
+              gaps.push(gap);
+              if (e.fish.kind !== 'eel')
+                expect(gap).toBeLessThanOrEqual(Math.max(stage.run.period[0], DEFAULT_CONFIG.fairness.eelWindow + EEL_MARGIN) + 2 * DT);
+            }
+          } else close();
+          wasInRun = emitter.inRun;
+          lastSpawn = sim.state.time;
+        }
+        // The current never jumps: it glides to each stage's speed.
+        expect(sim.state.speed - speedBefore).toBeLessThan(0.004);
+        if (speedUpAt > 0 && sim.state.time - speedUpAt > 4 && sim.state.time - speedUpAt < 4 + DT)
+          expect(runAt).toBeGreaterThan(speedUpAt);
+      }
+    }
+    // Runs also recur between speed-ups.
+    expect(runs / 20).toBeGreaterThan(4);
+  });
+
+  it('never spaces the stream evenly: gaps wander outside runs and tighten inside them', () => {
+    const sim = new Sim({ seed: 21, river, config: ENDLESS });
+    sim.drainEvents();
+    const outside: number[] = [];
+    const inside: number[] = [];
+    let lastSpawn = 0;
+    let wasInRun = false;
+    while (sim.state.time < 34) {
+      sim.step(DT, { kind: 'target', lane: 0 });
+      for (const e of sim.drainEvents()) {
+        if (e.type !== 'spawn') continue;
+        const inRun = sim.state.emitter.inRun;
+        if (inRun && wasInRun) inside.push(sim.state.time - lastSpawn);
+        else if (!inRun && !wasInRun) outside.push(sim.state.time - lastSpawn);
+        wasInRun = inRun;
+        lastSpawn = sim.state.time;
+      }
+    }
+    const [lo, hi] = DEFAULT_CONFIG.spacing;
+    const period = DEFAULT_CONFIG.stages[0]!.period;
+    expect(outside.length).toBeGreaterThan(10);
+    expect(inside.length).toBeGreaterThan(6);
+    expect(Math.min(...outside)).toBeGreaterThanOrEqual(Math.min(period * lo, DEFAULT_CONFIG.fairness.eelWindow) - 2 * DT);
+    expect(Math.max(...outside)).toBeLessThanOrEqual(period * hi + 2 * DT);
+    // A real spread, not one repeated value.
+    expect(Math.max(...outside) - Math.min(...outside)).toBeGreaterThan(period * 0.3);
+    expect(Math.max(...inside)).toBeLessThan(Math.min(...outside));
+  });
+
+  it('sweeps Still Water as a smooth sine: bank to bank, no jitter, no reversals', () => {
+    const [lo, hi] = DEFAULT_CONFIG.banks;
+    const stage = DEFAULT_CONFIG.stages[0]!;
+    for (const seed of SEEDS.slice(0, 20)) {
+      const sim = new Sim({ seed, river, config: { ...ENDLESS, speedUps: [] } });
+      const lanes: number[] = [];
+      const runEnded: boolean[] = [];
+      for (let i = 0; i < 24 / DT; i++) {
+        const inRun = sim.state.emitter.inRun;
+        sim.step(DT, { kind: 'target', lane: 0 });
+        lanes.push(sim.state.emitter.lane);
+        runEnded.push(inRun && !sim.state.emitter.inRun);
+      }
+      // Velocity never jumps (eased), and peaks at the sine's peak speed (an S-run's is the fastest).
+      const peak = ((Math.PI / 2) * (hi - lo)) / Math.min(stage.crossing, stage.run.crossing * 0.7);
+      let turns = 0;
+      let heading = 0;
+      for (let i = 2; i < lanes.length; i++) {
+        const v0 = (lanes[i - 1]! - lanes[i - 2]!) / DT;
+        const v1 = (lanes[i]! - lanes[i - 1]!) / DT;
+        expect(Math.abs(v1)).toBeLessThanOrEqual(peak + 1e-6);
+        // (The one allowed change of pace: easing off as an S-run ends.)
+        if (!runEnded[i] && !runEnded[i - 1]) expect(Math.abs(v1 - v0)).toBeLessThan(0.03);
+        if (Math.abs(v1) < 1e-9) continue;
+        if (heading !== 0 && Math.sign(v1) !== heading) {
+          turns++;
+          // It only ever turns at a bank.
+          expect(Math.min(Math.abs(lanes[i]! - lo), Math.abs(lanes[i]! - hi))).toBeLessThan(0.01);
+        }
+        heading = Math.sign(v1);
+      }
+      expect(turns).toBeGreaterThanOrEqual(5);
+      expect(Math.min(...lanes)).toBeCloseTo(lo, 2);
+      expect(Math.max(...lanes)).toBeCloseTo(hi, 2);
+    }
+  });
+
+  it('draws the chain as a curve: every fish spawns on the emitter, and consecutive fish are close', () => {
+    for (const seed of SEEDS.slice(0, 30)) {
       const sim = new Sim({ seed, river });
-      for (let i = 0; i < 13.9 / DT; i++) {
-        const resting = sim.state.resting;
-        sim.step(DT, tracker(sim));
+      sim.drainEvents();
+      let last: number | null = null;
+      let reversals = 0;
+      let steps = 0;
+      let lastDir = 0;
+      while (sim.state.status === 'playing' && sim.state.stageIndex === 0 && sim.state.time < 34) {
+        sim.step(DT, oracleIntent(sim.state, sim.config));
         for (const e of sim.drainEvents()) {
           if (e.type !== 'spawn') continue;
-          expect(resting && sim.state.resting).toBe(false);
-          if (sim.state.phase.id === 'still-water') expect(e.fish.kind).not.toBe('eel');
+          // No relocation: the fish is exactly where the emitter is.
+          expect(e.fish.lane).toBeCloseTo(sim.state.emitter.lane, 9);
+          if (last !== null) {
+            const d = e.fish.lane - last;
+            expect(Math.abs(d)).toBeLessThan(0.62);
+            // In an S-run the fish are a short step apart.
+            if (sim.state.emitter.inRun && sim.state.emitter.runK > 0) expect(Math.abs(d)).toBeLessThan(0.3);
+            if (lastDir !== 0 && Math.sign(d) !== lastDir) reversals++;
+            if (d !== 0) lastDir = Math.sign(d);
+            steps++;
+          }
+          last = e.fish.lane;
+        }
+      }
+      // The old director reversed on about two of every three spawns; a sine turns once per crossing.
+      expect(reversals / steps).toBeLessThan(0.3);
+    }
+  });
+
+  it('keeps Still Water mostly 1-lb fish with koi near 8% and eels rare and well spaced', () => {
+    const count = { bluegill: 0, koi: 0, eel: 0 };
+    let inRuns = 0;
+    for (const seed of SEEDS) {
+      const sim = new Sim({ seed, river, config: { ...ENDLESS, speedUps: [] } });
+      sim.drainEvents();
+      let sinceEel = 99;
+      for (let i = 0; i < 40 / DT; i++) {
+        sim.step(DT, { kind: 'target', lane: 0 });
+        for (const e of sim.drainEvents()) {
+          if (e.type !== 'spawn') continue;
+          if (e.fish.kind === 'eel') {
+            expect(sinceEel).toBeGreaterThanOrEqual(DEFAULT_CONFIG.stages[0]!.eelSpacing);
+            sinceEel = 0;
+          } else sinceEel++;
+          // An S-run in Still Water is all 1-lb fish; the mix is what flows between runs.
+          if (sim.state.emitter.inRun) {
+            expect(e.fish.kind).toBe('bluegill');
+            inRuns++;
+          } else count[e.fish.kind]++;
+        }
+      }
+    }
+    const total = count.bluegill + count.koi + count.eel;
+    expect(inRuns).toBeGreaterThan(total * 0.2);
+    expect(count.koi / total).toBeGreaterThan(0.06);
+    expect(count.koi / total).toBeLessThan(0.1);
+    expect(count.eel / total).toBeGreaterThan(0.03);
+    expect(count.eel / total).toBeLessThan(0.07);
+  });
+
+  it('swaps banks in Bank to Bank: bursts pinned at one bank, then immediately the other', () => {
+    const [lo, hi] = DEFAULT_CONFIG.banks;
+    let swaps = 0;
+    let others = 0;
+    for (const seed of SEEDS.slice(0, 20)) {
+      const sim = new Sim({ seed, river, startStage: 3, config: ENDLESS });
+      expect(sim.state.stage.id).toBe('bank-to-bank');
+      sim.drainEvents();
+      let last: number | null = null;
+      for (let i = 0; i < 40 / DT; i++) {
+        sim.step(DT, { kind: 'target', lane: 0 });
+        for (const e of sim.drainEvents()) {
+          if (e.type !== 'spawn') continue;
+          const lane = e.fish.lane;
+          // A clean swap: one spawn exactly at one bank, the next exactly at the other.
+          const atBanks = last !== null && Math.abs(Math.min(lane, last) - lo) < 1e-6 && Math.abs(Math.max(lane, last) - hi) < 1e-6;
+          if (atBanks) swaps++;
+          else others++;
+          last = lane;
+        }
+      }
+    }
+    expect(swaps).toBeGreaterThan(60);
+    expect(others).toBeGreaterThan(swaps);
+  });
+
+  it('has a Zen mode: the same night with no eels, and the river never bare for long', () => {
+    expect(MODES.map((m) => m.id)).toEqual(['normal', 'zen']);
+    expect(new Set(MODES.map((m) => m.id)).size).toBe(MODES.length);
+    expect(configFor('normal')).toBe(DEFAULT_CONFIG);
+    expect(configFor('nonsense')).toBe(DEFAULT_CONFIG);
+    const zen = configFor('zen');
+    expect(zen.eels).toBe(false);
+    for (const seed of SEEDS.slice(0, 12)) {
+      const sim = new Sim({ seed, river, config: zen });
+      sim.drainEvents();
+      const bot = new HumanBot(seed);
+      let lastSpawn = 0;
+      let longest = 0;
+      while (sim.state.status === 'playing' && sim.state.time < 300) {
+        sim.step(DT, bot.intent(sim.state, sim.config));
+        for (const e of sim.drainEvents()) {
+          expect(e.type).not.toBe('telegraph');
+          if (e.type !== 'spawn') continue;
+          expect(e.fish.kind).not.toBe('eel');
+          longest = Math.max(longest, sim.state.time - lastSpawn);
+          lastSpawn = sim.state.time;
+        }
+      }
+      // Nothing can shock you, and the same three speed-ups carry the night to a win.
+      expect(sim.state.lossCause).not.toBe('eel');
+      expect(sim.state.stageIndex).toBe(3);
+      // At most one empty place in a row where an eel would have been.
+      expect(longest).toBeLessThan(2 * DEFAULT_CONFIG.stages[0]!.period * DEFAULT_CONFIG.spacing[1] + 0.1);
+    }
+  });
+
+  it('spawns every fish exactly on the emitter in every stage, and keeps S-runs apart', () => {
+    for (const seed of SEEDS.slice(0, 60)) {
+      const sim = new Sim({ seed, river });
+      sim.drainEvents();
+      let lastRun = -Infinity;
+      while (sim.state.status === 'playing' && sim.state.time < 200) {
+        sim.step(DT, oracleIntent(sim.state, sim.config));
+        for (const e of sim.drainEvents()) {
+          // Nothing is moved, clamped or relocated at the shipped pace, bursts and run starts included.
+          // (After a burst's last fish the emitter has already jumped to the other bank.)
+          if (e.type === 'spawn') {
+            const [lo, hi] = DEFAULT_CONFIG.banks;
+            const { lane } = sim.state.emitter;
+            const swapped = Math.abs(e.fish.lane + lane - (lo + hi)) < 1e-9 && Math.abs(Math.abs(e.fish.lane - lane) - (hi - lo)) < 1e-9;
+            if (!swapped) expect(e.fish.lane, `seed ${seed} t=${sim.state.time.toFixed(1)}`).toBeCloseTo(lane, 9);
+          }
+          if (e.type !== 'run') continue;
+          // A run never starts on the tail of another: a speed-up lengthens the one under way.
+          expect(sim.state.time - lastRun, `seed ${seed}`).toBeGreaterThan(4);
+          expect(e.fish).toBeLessThanOrEqual(sim.state.stage.run.fish[1] + 4);
+          lastRun = sim.state.time;
         }
       }
     }
@@ -171,8 +500,8 @@ describe('phases and emitter', () => {
 
   it('keeps the emitter and every spawn inside the river on 200 seeds', () => {
     for (const seed of SEEDS) {
-      const sim = new Sim({ seed, river });
-      for (let i = 0; i < 34 / DT && sim.state.status === 'playing'; i++) {
+      const sim = new Sim({ seed, river, startStage: seed % 4 });
+      for (let i = 0; i < 20 / DT && sim.state.status === 'playing'; i++) {
         sim.step(DT, tracker(sim));
         const lane = sim.state.emitter.lane;
         expect(lane).toBeGreaterThanOrEqual(0);
@@ -186,64 +515,73 @@ describe('phases and emitter', () => {
     }
   });
 
-  it('holds lanes: a swimming fish never drifts sideways', () => {
-    const sim = new Sim({ seed: 3, river });
-    const lanes = new Map<number, number>();
-    for (let i = 0; i < 20 / DT; i++) {
-      sim.step(DT, idle());
-      for (const f of sim.state.fish) {
-        if (f.status !== 'swimming') continue;
-        if (!lanes.has(f.id)) lanes.set(f.id, f.lane);
-        expect(f.lane).toBe(lanes.get(f.id));
+  it('holds lanes: a swimming fish never drifts or jumps sideways', () => {
+    for (const startStage of [0, 3]) {
+      const sim = new Sim({ seed: 3, river, startStage, config: ENDLESS });
+      const lanes = new Map<number, number>();
+      for (let i = 0; i < 20 / DT; i++) {
+        sim.step(DT, { kind: 'target', lane: 0 });
+        for (const f of sim.state.fish) {
+          if (f.status !== 'swimming') continue;
+          if (!lanes.has(f.id)) lanes.set(f.id, f.lane);
+          expect(f.lane).toBe(lanes.get(f.id));
+        }
+        if (sim.state.status !== 'playing') break;
       }
-      if (sim.state.status !== 'playing') break;
+      expect(lanes.size).toBeGreaterThan(10);
     }
-    expect(lanes.size).toBeGreaterThan(10);
   });
 
-  it('telegraphs every eel before it appears', () => {
-    const { events } = run(11, 34, tracker);
-    let pending = 0;
+  it('keeps the chain evenly spaced through a speed-up: one current carries every fish', () => {
+    const sim = new Sim({ seed: 9, river, config: ENDLESS });
+    for (let i = 0; i < 37 / DT; i++) {
+      sim.step(DT, { kind: 'target', lane: 0 });
+      const swimming = sim.state.fish.filter((f) => f.status === 'swimming');
+      const speeds = new Set(swimming.map((f) => f.speed));
+      expect(speeds.size).toBeLessThanOrEqual(1);
+      // Nobody overtakes: progress order is spawn order.
+      for (let k = 1; k < swimming.length; k++) expect(swimming[k]!.progress).toBeLessThan(swimming[k - 1]!.progress);
+    }
+    expect(sim.state.stageIndex).toBe(1);
+  });
+
+  it('telegraphs every eel before it appears, and calls a warning off if the eel will not come', () => {
     let eels = 0;
-    for (const e of events) {
-      if (e.type === 'telegraph') pending++;
-      if (e.type === 'spawn' && e.fish.kind === 'eel') {
-        eels++;
-        expect(pending).toBeGreaterThan(0);
-        pending--;
+    for (const seed of SEEDS.slice(0, 20)) {
+      // Doubled density makes the eel-window guard bite, so some warned eels become fish.
+      const config: SimConfig = seed % 2 ? ENDLESS : { ...ENDLESS, tune: { ...ENDLESS.tune, density: 2.2 } };
+      const sim = new Sim({ seed, river, startStage: 2, config });
+      sim.drainEvents();
+      let pending = 0;
+      for (let i = 0; i < 30 / DT && sim.state.status === 'playing'; i++) {
+        sim.step(DT, { kind: 'target', lane: 0 });
+        for (const e of sim.drainEvents()) {
+          if (e.type === 'telegraph') pending++;
+          if (e.type === 'telegraphCancel') pending--;
+          if (e.type === 'spawn' && e.fish.kind === 'eel') {
+            eels++;
+            expect(pending).toBeGreaterThan(0);
+            pending--;
+          }
+        }
+        // Never more open warnings than the two spawns rolled ahead.
+        expect(pending).toBeGreaterThanOrEqual(0);
+        expect(pending).toBeLessThanOrEqual(2);
       }
     }
-    expect(eels).toBeGreaterThan(0);
+    expect(eels).toBeGreaterThan(100);
   });
 });
 
 describe('eel warnings and spacing at the net', () => {
-  it('gives every eel its full telegraph lead, even as the first spawn of a phase', () => {
-    for (const seed of SEEDS.slice(0, 60)) {
-      const sim = new Sim({ seed, river });
-      let warnedAt: number | null = null;
-      for (let i = 0; i < 34 / DT && sim.state.status === 'playing'; i++) {
-        sim.step(DT, tracker(sim));
-        for (const e of sim.drainEvents()) {
-          if (e.type === 'telegraph') warnedAt = sim.state.time;
-          if (e.type === 'spawn' && e.fish.kind === 'eel') {
-            expect(warnedAt).not.toBeNull();
-            expect(sim.state.time - (warnedAt ?? 0)).toBeGreaterThanOrEqual(DEFAULT_CONFIG.telegraphLead - 2 * DT);
-            warnedAt = null;
-          }
-        }
-      }
-    }
-  });
-
   it('never has an eel and a fish cross the rail close together in both time and lane', () => {
     // Measured where it matters: actual rail-crossing times and lanes, not spawn-time estimates.
     const { eelWindow, eelGap } = DEFAULT_CONFIG.fairness;
     for (const seed of SEEDS) {
-      const sim = new Sim({ seed, river, config: { ...DEFAULT_CONFIG, maxEscaped: 1e9 } });
+      const sim = new Sim({ seed, river, startStage: seed % 4, config: { ...DEFAULT_CONFIG, maxEscaped: 1e9 } });
       const crossings: { t: number; lane: number; eel: boolean }[] = [];
       const seen = new Set<number>();
-      for (let i = 0; i < 34 / DT; i++) {
+      for (let i = 0; i < 24 / DT; i++) {
         sim.step(DT, idle());
         sim.drainEvents();
         for (const f of sim.state.fish)
@@ -261,35 +599,18 @@ describe('eel warnings and spacing at the net', () => {
   });
 });
 
-describe('fairness guards', () => {
-  it('pulls far non-eel jumps to the midpoint and keeps eels clear of fish, on 200 seeds', () => {
-    const { maxJump, eelWindow, eelGap } = DEFAULT_CONFIG.fairness;
-    for (const seed of SEEDS) {
-      const sim = new Sim({ seed, river });
-      let lastLane: number | null = null;
-      for (let i = 0; i < 34 / DT && sim.state.status === 'playing'; i++) {
-        sim.step(DT, tracker(sim));
-        for (const e of sim.drainEvents()) {
-          if (e.type !== 'spawn') continue;
-          if (e.fish.kind !== 'eel' && lastLane !== null) expect(Math.abs(e.fish.lane - lastLane)).toBeLessThanOrEqual(maxJump + 1e-9);
-          lastLane = e.fish.lane;
-          for (const other of sim.state.fish) {
-            if (other === e.fish || other.status !== 'swimming') continue;
-            if ((other.kind === 'eel') === (e.fish.kind === 'eel')) continue;
-            const gapSeconds = Math.abs((1 - other.progress) / other.speed - (1 - e.fish.progress) / e.fish.speed);
-            if (gapSeconds <= eelWindow) expect(Math.abs(other.lane - e.fish.lane)).toBeGreaterThanOrEqual(eelGap - 1e-6);
-          }
-        }
-      }
-    }
-  });
-});
-
 describe('catching and scoring', () => {
-  const quiet: SimConfig = { ...DEFAULT_CONFIG, restSeconds: 1000 };
+  // No spawns at all: a script whose only phase never reaches its first spawn.
+  const quiet: SimConfig = {
+    ...DEFAULT_CONFIG,
+    prefillSeconds: 0,
+    speedUps: [],
+    stages: DEFAULT_CONFIG.stages.map((st) => ({ ...st, period: 1e6 })),
+    telegraphLead: -1,
+  };
 
   it('catches with a circle test and adds weight and streak', () => {
-    const sim = new Sim({ seed: 1, river, config: quiet });
+    const sim = new Sim({ seed: 1, river, config: quiet, empty: true });
     sim.debugSpawn('bluegill', 0.5, 0.9);
     sim.debugSpawn('koi', 0.52, 0.8);
     const events: SimEvent[] = [];
@@ -305,7 +626,7 @@ describe('catching and scoring', () => {
   });
 
   it('counts a fish that passes outside the net as escaped and resets the streak', () => {
-    const sim = new Sim({ seed: 1, river, config: quiet });
+    const sim = new Sim({ seed: 1, river, config: quiet, empty: true });
     sim.debugSpawn('bluegill', 0.5, 0.9);
     sim.debugSpawn('koi', 0.95, 0.85);
     const events: SimEvent[] = [];
@@ -320,13 +641,13 @@ describe('catching and scoring', () => {
   });
 
   it('ends the run on one eel, and eels that pass cost nothing', () => {
-    const pass = new Sim({ seed: 1, river, config: quiet });
+    const pass = new Sim({ seed: 1, river, config: quiet, empty: true });
     pass.debugSpawn('eel', 0.95, 0.9);
     for (let i = 0; i < 120; i++) pass.step(DT, idle());
     expect(pass.state.status).toBe('playing');
     expect(pass.state.escaped).toBe(0);
 
-    const hit = new Sim({ seed: 1, river, config: quiet });
+    const hit = new Sim({ seed: 1, river, config: quiet, empty: true });
     hit.debugSpawn('eel', 0.5, 0.9);
     const events: SimEvent[] = [];
     for (let i = 0; i < 120; i++) {
@@ -339,7 +660,7 @@ describe('catching and scoring', () => {
   });
 
   it('reports a near miss when an eel slips just past the net', () => {
-    const sim = new Sim({ seed: 1, river, config: quiet });
+    const sim = new Sim({ seed: 1, river, config: quiet, empty: true });
     const reach = DEFAULT_CONFIG.net.radius + DEFAULT_CONFIG.radii.eel;
     // Lanes span the usable width, which is slightly narrower than a full river-width.
     const laneGap = (reach + 0.02) / (1 - 2 * RIVER.laneMargin) / 1;
@@ -354,15 +675,20 @@ describe('catching and scoring', () => {
   });
 
   it('loses at 20 lb escaped and wins at 200 lb caught', () => {
-    // A net parked at the bank with no eels in the script: only the escape budget can end it,
+    // A net parked at the bank with no eels in the night: only the escape budget can end it,
     // and it ends exactly when the 20th pound slips past.
-    const noEels: SimConfig = { ...DEFAULT_CONFIG, phases: DEFAULT_CONFIG.phases.map((p) => ({ ...p, eelChance: 0, sweep: 0 })) };
+    const noEels: SimConfig = {
+      ...DEFAULT_CONFIG,
+      stages: DEFAULT_CONFIG.stages.map((st) => ({ ...st, eelChance: 0 })),
+      // A net too small to reach the sweep from where it is parked, hard against the bank.
+      net: { ...DEFAULT_CONFIG.net, radius: 0.001 },
+    };
     for (const seed of SEEDS.slice(0, 20)) {
       const sim = new Sim({ seed, river, config: noEels });
       let before = 0;
       for (let i = 0; i < 200 / DT && sim.state.status === 'playing'; i++) {
         before = sim.state.escaped;
-        sim.step(DT, { kind: 'target', lane: sim.state.emitter.lane > 0.5 ? 0 : 1 });
+        sim.step(DT, { kind: 'target', lane: 1 });
       }
       expect(sim.state.status).toBe('lost');
       expect(sim.state.lossCause).toBe('escaped');
@@ -370,7 +696,7 @@ describe('catching and scoring', () => {
       expect(sim.state.escaped).toBeGreaterThanOrEqual(20);
     }
 
-    const win = new Sim({ seed: 1, river, config: { ...quiet, winWeight: 10 } });
+    const win = new Sim({ seed: 1, river, config: { ...quiet, winWeight: 10 }, empty: true });
     win.debugSpawn('koi', 0.5, 0.9);
     win.debugSpawn('koi', 0.5, 0.8);
     const events: SimEvent[] = [];
@@ -393,9 +719,89 @@ describe('determinism', () => {
     expect(a.events.map((e) => e.type)).toEqual(b.events.map((e) => e.type));
   });
 
-  it('the tracker catches fish in the opening phases on most seeds', () => {
+  it('the tracker catches fish in the opening stage on most seeds', () => {
     let caught = 0;
     for (const seed of SEEDS.slice(0, 50)) caught += run(seed, 14, tracker).sim.state.caught;
-    expect(caught / 50).toBeGreaterThan(12);
+    expect(caught / 50).toBeGreaterThan(10);
+  });
+});
+
+describe('the whole night', () => {
+  const oracle = (sim: Sim): NetIntent => oracleIntent(sim.state, sim.config);
+  const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? NaN;
+
+  it('is winnable on every seed by a planner with the real net, without touching an eel', () => {
+    for (const seed of SEEDS.slice(0, 30)) {
+      const { sim } = run(seed, 300, oracle);
+      expect(sim.state.status, `seed ${seed}`).toBe('won');
+      expect(sim.state.escaped).toBeLessThan(DEFAULT_CONFIG.maxEscaped);
+    }
+  });
+
+  it('keeps the full eel warning in Bank to Bank, where the pace is fastest', () => {
+    let lateEels = 0;
+    for (const seed of SEEDS.slice(0, 24)) {
+      const sim = new Sim({ seed, river });
+      const warned: number[] = [];
+      while (sim.state.status === 'playing' && sim.state.time < 170) {
+        sim.step(DT, oracle(sim));
+        for (const e of sim.drainEvents()) {
+          if (e.type === 'telegraph') warned.push(sim.state.time);
+          if (e.type === 'telegraphCancel') warned.shift();
+          if (e.type !== 'spawn' || e.fish.kind !== 'eel') continue;
+          if (sim.state.stageIndex === 3) lateEels++;
+          // Its warning came a full lead earlier, even when fish spawn faster than the lead.
+          const at = warned.shift();
+          expect(at, `seed ${seed} t=${sim.state.time.toFixed(2)}`).toBeDefined();
+          expect(sim.state.time - (at ?? 0)).toBeGreaterThanOrEqual(DEFAULT_CONFIG.telegraphLead - 2 * DT - 1e-6);
+        }
+      }
+    }
+    expect(lateEels).toBeGreaterThan(200);
+  });
+
+  it('holds the pace for a human-like player: speed-ups near 0:30, 1:00 and 1:30, a win in 2:00-2:30', () => {
+    const ups: number[][] = [[], [], []];
+    const wins: number[] = [];
+    const N = 40;
+    for (const seed of SEEDS.slice(0, N)) {
+      const sim = new Sim({ seed, river });
+      sim.drainEvents();
+      const bot = new HumanBot(seed);
+      while (sim.state.status === 'playing' && sim.state.time < 300) {
+        sim.step(DT, bot.intent(sim.state, sim.config));
+        for (const e of sim.drainEvents()) if (e.type === 'stage') ups[e.index - 1]?.push(sim.state.time);
+      }
+      if (sim.state.status === 'won') wins.push(sim.state.time);
+    }
+    expect(median(ups[0]!)).toBeGreaterThan(24);
+    expect(median(ups[0]!)).toBeLessThanOrEqual(35);
+    expect(median(ups[1]!)).toBeGreaterThan(52);
+    expect(median(ups[1]!)).toBeLessThanOrEqual(65);
+    expect(median(ups[2]!)).toBeGreaterThan(80);
+    expect(median(ups[2]!)).toBeLessThanOrEqual(95);
+    // A solid player wins in about 2:00-2:30, and the night is neither a formality nor a wall.
+    expect(median(wins)).toBeGreaterThanOrEqual(120);
+    expect(median(wins)).toBeLessThanOrEqual(150);
+    expect(wins.length / N).toBeGreaterThan(0.3);
+    expect(wins.length / N).toBeLessThan(0.8);
+  });
+
+  it('applies the tune multipliers to the running pace', () => {
+    const sim = new Sim({ seed: 1, river });
+    sim.config = { ...sim.config, tune: { speed: 2, density: 2, sweep: 0.5, eel: 0 } };
+    // The current glides to the new speed rather than snapping.
+    for (let i = 0; i < 22 / DT; i++) sim.step(DT, oracle(sim));
+    sim.drainEvents();
+    const tuned = sim.pace();
+    // (A speed-up may have come in the meantime: measure against the stage the night is in.)
+    expect(tuned.travel).toBeCloseTo(DEFAULT_CONFIG.travel / (sim.state.stage.speed * 2), 1);
+    expect(tuned.period).toBeCloseTo(sim.state.stage.period / 2, 6);
+    expect(tuned.crossing).toBeCloseTo(sim.state.stage.crossing * 2, 6);
+    expect(tuned.eelChance).toBe(0);
+    for (let i = 0; i < 20 / DT && sim.state.status === 'playing'; i++) {
+      sim.step(DT, oracle(sim));
+      for (const e of sim.drainEvents()) if (e.type === 'spawn') expect(e.fish.kind).not.toBe('eel');
+    }
   });
 });

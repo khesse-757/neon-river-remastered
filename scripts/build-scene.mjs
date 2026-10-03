@@ -197,6 +197,29 @@ for (let y = 0; y < SRC_H; y++) {
   }
 }
 
+// Far layer (sky + skyline) for parallax: everything reachable from the top edge without crossing
+// the green of the hills and trees, above the river's far bend.
+{
+  const far = mask();
+  const stack = [];
+  for (let x = 0; x < SRC_W; x++) stack.push(x);
+  while (stack.length) {
+    const i = stack.pop();
+    if (far[i]) continue;
+    const x = i % SRC_W,
+      y = (i / SRC_W) | 0;
+    if (y > 196) continue;
+    const [r, g, b] = srcPx(x, y);
+    if (g > r + 6 && g > b + 2) continue;
+    far[i] = 1;
+    if (x > 0) stack.push(i - 1);
+    if (x < SRC_W - 1) stack.push(i + 1);
+    if (y > 0) stack.push(i - SRC_W);
+    stack.push(i + SRC_W);
+  }
+  M.sky = far;
+}
+
 // ---- per-grid outputs ------------------------------------------------------------------------
 const writePng = (path, w, h, fill) => {
   const png = new PNG({ width: w, height: h });
