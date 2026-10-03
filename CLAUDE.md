@@ -33,15 +33,25 @@ anything visual. Do **not** use `threejs-3d-generator`. Use
 - All motion is delta-time based. No per-frame lerps.
 - Tuning values live in one typed config (`src/sim/config.ts` + phase table);
   record every tuning change in `artifacts/game-progress.md`.
-- Dev tools (path editor, lil-gui, debug overlays, stats) only behind
+- Dev tools (path editor, lil-gui, debug overlays, stats, `?tune`, `?audition`) only behind
   `import.meta.env.DEV` or `?debug`; never in the production bundle's default path.
 - Keep `__THREE_GAME_TEST_HOOKS__` states real (see brief §7).
 
 ## Quality gates (before every commit)
 
-`npm run check` = lint + typecheck + unit tests + secret scan. Playwright/visual
-suites run at milestones. Never claim something works without having run it;
-say what ran.
+`npm run check` = lint + typecheck + unit tests + secret scan. Never claim
+something works without having run it; say what ran. How much else to run is
+set by the verification budget below.
+
+## Verification budget (lean mode)
+
+- Per change: `npm run check` + the Playwright smoke test. Rely on CI for the rest.
+- Screenshots: only of the screen you changed, one viewport, only when the change is visual. No videos unless Kyle asks.
+- No canvas-inspector manifests or scorecards until the release pass.
+- playtester: only when spawn/balance code changes, 100 human-like + 20 oracle seeds, one run. No re-runs to chase a 2–3% shift.
+- fresh-eyes-reviewer: once at the end of this gate and once on the release candidate. Not per change.
+- Kyle playtests on real devices; prefer asking him over more bot tuning.
+- Keep reports short: what changed, what ran, what Kyle needs to decide.
 
 ## Git and GitHub (you own this)
 
@@ -71,12 +81,13 @@ say what ran.
 
 ## Agents and loops
 
-- `fresh-eyes-reviewer` (own worktree): run at the end of every gate and after
-  big changes, before telling Kyle something is done. Fix blockers/majors.
-- `playtester` (own worktree): run whenever balance-relevant code changes.
-- Run the game yourself: start the dev server in the background, drive it with
-  the test hooks / canvas inspector or the Playwright MCP browser, and look at
-  the screenshots. Stop servers you start.
+- `fresh-eyes-reviewer` (own worktree): once at the end of a gate and once on the
+  release candidate (see the verification budget). Fix blockers/majors.
+- `playtester` (own worktree, runs on Sonnet): only when spawn/balance code changes;
+  one run of 100 human-like + 20 oracle seeds.
+- Run the game yourself when a change is visual: start the dev server in the
+  background, drive it with the test hooks or the Playwright MCP browser, and look
+  at one screenshot of the screen you changed. Stop servers you start.
 - Never use broad `pkill`/`killall`; stop only the PIDs you started.
 - `.claude/loop.md` is the default `/loop` prompt (CI babysitting + next action).
 
@@ -112,7 +123,7 @@ Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `pha
 `win`, `win-results`, `loss-eel`, `loss-escaped`. Other hooks: `audioLevel()` (RMS at the final
 output), `setAudioBeds(on)`, `soloAudio(name)`, `setWeight(lb)`, `setGameMode('normal'|'zen')`,
 `openAdvancedAudio(open)`.
-Dev pages: `?tune` (live pace multipliers + copy values), `?audition` (three leitmotif candidates with a
+Dev pages (dev server, or `?debug` on a build): `?tune` (live pace multipliers + copy values), `?audition` (three leitmotif candidates with a
 live level meter; ignores mute and the sound switches; `?theme=lantern|heron|ripple` selects one).
 Look-dev URL params: `?actors=device` (3D layer at full device pixels; default caps it near DPR 2), `?actors=3x`,
 `?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`, `?mode=normal|zen`.

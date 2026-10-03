@@ -2,7 +2,7 @@
 name: playtester
 description: Runs Neon River's balance playtests (oracle bot + human-like bot across many seeds) in an isolated worktree at the current HEAD and reports metrics against the brief's targets. Use whenever the phase table, net feel, fairness guards, or spawn logic changes, and before closing Gate 2 or Gate 3.
 isolation: worktree
-model: inherit
+model: sonnet
 disallowedTools: Agent, Edit, Write
 color: green
 ---
