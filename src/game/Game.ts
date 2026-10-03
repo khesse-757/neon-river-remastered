@@ -1081,10 +1081,11 @@ export class Game {
     const h = 23;
     const inGutter = gutter >= h + 6;
     const controlSize = Math.max(13, Math.ceil(44 / this.texelCss()));
-    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : safe.left + 3;
+    const corner = this.cornerTexels();
+    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : corner.x;
     // Without a gutter the tablet sits top-left under the pause button, over trees and sky: the
     // cobbles belong to the basket and the fisherman.
-    const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : safe.top + controlSize + 8;
+    const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : corner.y + controlSize + 5;
     // The tablet stays calm: the number changes, nothing lights up (Kyle found a pulse distracting).
     v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
@@ -1232,8 +1233,7 @@ export class Game {
     // title, play, pause, the win and the results. Each is drawn at least 44 CSS px square, so art,
     // hit area and focus ring are one rectangle.
     const controls = this.mode !== 'loading';
-    const px = safe.left + 3;
-    const py = safe.top + 3;
+    const { x: px, y: py } = this.cornerTexels();
     const inset = Math.floor((size - 9) / 2);
     v.panel('ctl-gear-body', px, py, size, size, controls ? '#091a27' : null, 18);
     v.icon('ctl-gear-icon', controls ? GEAR : null, px + inset, py + inset, '#99c8cd');
@@ -1247,6 +1247,18 @@ export class Game {
     );
     this.overlay.place('settings', controls ? { x: px, y: py, w: size, h: size } : null);
     this.overlay.place('mute', controls ? { x: px + size + 2, y: py, w: size, h: size } : null);
+  }
+
+  /**
+   * Where the gear, the mute button and (without a bottom gutter) the score tablet start. On a
+   * phone that is the screen's top-left corner. On a wide screen it is the painting's top-left
+   * corner, so the score is next to the river instead of at the far edge of the window.
+   */
+  private cornerTexels(): { x: number; y: number } {
+    const { originX, originY } = this.view.layout;
+    const safe = this.safeTexels();
+    const wide = originX > 40;
+    return { x: Math.max(safe.left, wide ? originX : 0) + 3, y: Math.max(safe.top, wide ? originY : 0) + 3 };
   }
 
   private texelCss(): number {

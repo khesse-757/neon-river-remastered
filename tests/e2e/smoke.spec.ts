@@ -21,10 +21,17 @@ async function touchDrag(page: Page, from: [number, number], to: [number, number
 
 /** The gear and the mute button are on screen, top-left, in every mode. */
 async function expectCornerControls(page: Page, where: string): Promise<void> {
+  // The corner is the screen's on a phone and the painting's on a wide screen.
+  const left = await page.evaluate(() => {
+    const { scale, targetW, gridW } = window.__THREE_GAME_DIAGNOSTICS__!.layout;
+    const origin = Math.floor((targetW - gridW) / 2);
+    return origin > 40 ? (origin * scale) / (window.devicePixelRatio || 1) : 0;
+  });
   for (const id of ['#btn-settings', '#btn-mute']) {
     const box = await page.locator(id).boundingBox();
     expect(box, `${id} on ${where}`).not.toBeNull();
-    expect(box!.x, `${id} on ${where}`).toBeLessThan(120);
+    expect(box!.x, `${id} on ${where}`).toBeGreaterThanOrEqual(left);
+    expect(box!.x, `${id} on ${where}`).toBeLessThan(left + 120);
     expect(box!.y, `${id} on ${where}`).toBeLessThan(80);
     expect(Math.min(box!.width, box!.height), `${id} on ${where}`).toBeGreaterThanOrEqual(44);
   }
