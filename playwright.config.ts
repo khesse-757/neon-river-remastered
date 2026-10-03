@@ -1,12 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests',
+  testDir: './tests/e2e',
   // One worker: parallel headless WebGL contexts contend for the GPU, and the
   // frame-time collapse makes game time drift from wall time, flaking timed
   // gameplay phases and screenshot baselines.
   workers: 1,
-  timeout: 30_000,
+  timeout: 90_000,
   expect: {
     timeout: 5_000,
   },

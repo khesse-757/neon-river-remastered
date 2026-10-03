@@ -12,7 +12,11 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "resolveJsonModule": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src", "tests", "playwright.config.ts"]
+  "include": ["src", "tests", "playwright.config.ts", "vitest.config.ts", "vite.config.ts"]
 }

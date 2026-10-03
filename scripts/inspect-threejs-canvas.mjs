@@ -59,13 +59,21 @@ export function parseArgs(argv) {
       return next;
     };
     if (value === '--url') args.url = takeValue();
-    else if (value === '--out') { args.out = takeValue(); singleCaptureFlags.push(value); }
-    else if (value === '--mobile') { args.mobile = true; singleCaptureFlags.push(value); }
-    else if (value === '--wait') args.wait = Number(takeValue());
-    else if (value === '--state') { args.state = takeValue(); singleCaptureFlags.push(value); }
-    else if (value === '--seed') args.seed = Number(takeValue());
-    else if (value === '--run-id') { args.runId = takeValue(); singleCaptureFlags.push(value); }
-    else if (value === '--manifest') args.manifest = takeValue();
+    else if (value === '--out') {
+      args.out = takeValue();
+      singleCaptureFlags.push(value);
+    } else if (value === '--mobile') {
+      args.mobile = true;
+      singleCaptureFlags.push(value);
+    } else if (value === '--wait') args.wait = Number(takeValue());
+    else if (value === '--state') {
+      args.state = takeValue();
+      singleCaptureFlags.push(value);
+    } else if (value === '--seed') args.seed = Number(takeValue());
+    else if (value === '--run-id') {
+      args.runId = takeValue();
+      singleCaptureFlags.push(value);
+    } else if (value === '--manifest') args.manifest = takeValue();
     else if (value === '--json') args.json = true;
     else if (value === '-h' || value === '--help') args.help = true;
     else {
@@ -114,8 +122,13 @@ export function readManifestCaptures(manifest) {
     if (typeof report !== 'string' || !report.endsWith('.json')) {
       throw new Error(`capture ${index} report must be a .json path`);
     }
-    return { mobile: mode === 'mobile', state, runId: manifest.runId, reportPath: report,
-      screenshotPath: report.replace(/\.json$/, '.png') };
+    return {
+      mobile: mode === 'mobile',
+      state,
+      runId: manifest.runId,
+      reportPath: report,
+      screenshotPath: report.replace(/\.json$/, '.png'),
+    };
   });
 }
 
@@ -164,80 +177,101 @@ async function runPreparation(page, { state = null, seed, timeoutMs = 10_000, wa
       new Promise((_, reject) => {
         hostTimer = setTimeout(() => reject(new Error(message)), timeoutMs);
       }),
-      page.evaluate(async ({ state, seed, capture, wait, deadline, message }) => {
-        const hooks = window.__THREE_GAME_TEST_HOOKS__;
-        const namedCapture = capture && state !== null;
-        if ((state !== null || seed !== undefined) && !hooks) {
-          throw new Error('--state/--seed requires window.__THREE_GAME_TEST_HOOKS__');
-        }
-        if (state !== null && typeof hooks.setState !== 'function') {
-          throw new Error('--state requires a setState function');
-        }
-        if (seed !== undefined && typeof hooks.seed !== 'function') {
-          throw new Error('--seed requires a seed function');
-        }
-        if (namedCapture && typeof hooks.setPausedForScreenshot !== 'function') {
-          throw new Error('--state capture requires a setPausedForScreenshot function that stops simulation immediately and keeps rendering');
-        }
+      page.evaluate(
+        async ({ state, seed, capture, wait, deadline, message }) => {
+          const hooks = window.__THREE_GAME_TEST_HOOKS__;
+          const namedCapture = capture && state !== null;
+          if ((state !== null || seed !== undefined) && !hooks) {
+            throw new Error('--state/--seed requires window.__THREE_GAME_TEST_HOOKS__');
+          }
+          if (state !== null && typeof hooks.setState !== 'function') {
+            throw new Error('--state requires a setState function');
+          }
+          if (seed !== undefined && typeof hooks.seed !== 'function') {
+            throw new Error('--seed requires a seed function');
+          }
+          if (namedCapture && typeof hooks.setPausedForScreenshot !== 'function') {
+            throw new Error(
+              '--state capture requires a setPausedForScreenshot function that stops simulation immediately and keeps rendering',
+            );
+          }
 
-        let expired = false;
-        let timer;
-        let settleTimer;
-        let frameId;
-        const checkDeadline = () => {
-          if (expired || Date.now() >= deadline) throw new Error(message);
-        };
-        const step = async (operation) => {
-          checkDeadline();
-          const result = await operation();
-          checkDeadline();
-          return result;
-        };
-        try {
-          return await Promise.race([
-            new Promise((_, reject) => {
-              timer = setTimeout(() => {
-                expired = true;
-                reject(new Error(message));
-              }, Math.max(0, deadline - Date.now()));
-            }),
-            (async () => {
-              if (namedCapture) await step(() => hooks.setPausedForScreenshot(false));
-              if (seed !== undefined) await step(() => hooks.seed(seed));
-              if (state !== null) {
-                const acknowledgement = await step(() => hooks.setState(state));
-                if (!acknowledgement || typeof acknowledgement !== 'object' ||
-                    Array.isArray(acknowledgement) || acknowledgement.state !== state) {
-                  throw new Error(`setState(${JSON.stringify(state)}) must acknowledge {state: ${JSON.stringify(state)}}`);
+          let expired = false;
+          let timer;
+          let settleTimer;
+          let frameId;
+          const checkDeadline = () => {
+            if (expired || Date.now() >= deadline) throw new Error(message);
+          };
+          const step = async (operation) => {
+            checkDeadline();
+            const result = await operation();
+            checkDeadline();
+            return result;
+          };
+          try {
+            return await Promise.race([
+              new Promise((_, reject) => {
+                timer = setTimeout(
+                  () => {
+                    expired = true;
+                    reject(new Error(message));
+                  },
+                  Math.max(0, deadline - Date.now()),
+                );
+              }),
+              (async () => {
+                if (namedCapture) await step(() => hooks.setPausedForScreenshot(false));
+                if (seed !== undefined) await step(() => hooks.seed(seed));
+                if (state !== null) {
+                  const acknowledgement = await step(() => hooks.setState(state));
+                  if (
+                    !acknowledgement ||
+                    typeof acknowledgement !== 'object' ||
+                    Array.isArray(acknowledgement) ||
+                    acknowledgement.state !== state
+                  ) {
+                    throw new Error(`setState(${JSON.stringify(state)}) must acknowledge {state: ${JSON.stringify(state)}}`);
+                  }
+                  // Freeze in this evaluation immediately after setup, before any settling or render wait.
+                  if (namedCapture) await step(() => hooks.setPausedForScreenshot(true));
                 }
-                // Freeze in this evaluation immediately after setup, before any settling or render wait.
-                if (namedCapture) await step(() => hooks.setPausedForScreenshot(true));
-              }
-              if (capture) {
-                if (namedCapture && typeof hooks.setReducedMotion === 'function') {
-                  await step(() => hooks.setReducedMotion(true));
+                if (capture) {
+                  if (namedCapture && typeof hooks.setReducedMotion === 'function') {
+                    await step(() => hooks.setReducedMotion(true));
+                  }
+                  if (namedCapture && typeof hooks.hideDebugUi === 'function') {
+                    await step(() => hooks.hideDebugUi(true));
+                  }
+                  if (wait > 0)
+                    await step(
+                      () =>
+                        new Promise((resolve) => {
+                          settleTimer = setTimeout(resolve, wait);
+                        }),
+                    );
+                  if (document.fonts) await step(() => document.fonts.ready);
+                  await step(
+                    () =>
+                      new Promise((resolve) => {
+                        frameId = requestAnimationFrame(() => {
+                          if (!expired) frameId = requestAnimationFrame(resolve);
+                        });
+                      }),
+                  );
                 }
-                if (namedCapture && typeof hooks.hideDebugUi === 'function') {
-                  await step(() => hooks.hideDebugUi(true));
-                }
-                if (wait > 0) await step(() => new Promise((resolve) => { settleTimer = setTimeout(resolve, wait); }));
-                if (document.fonts) await step(() => document.fonts.ready);
-                await step(() => new Promise((resolve) => {
-                  frameId = requestAnimationFrame(() => {
-                    if (!expired) frameId = requestAnimationFrame(resolve);
-                  });
-                }));
-              }
-              return { requestedState: state, appliedState: state };
-            })(),
-          ]);
-        } finally {
-          expired = true;
-          clearTimeout(timer);
-          clearTimeout(settleTimer);
-          if (frameId !== undefined) cancelAnimationFrame(frameId);
-        }
-      }, { state, seed, capture, wait, deadline, message }),
+                return { requestedState: state, appliedState: state };
+              })(),
+            ]);
+          } finally {
+            expired = true;
+            clearTimeout(timer);
+            clearTimeout(settleTimer);
+            if (frameId !== undefined) cancelAnimationFrame(frameId);
+          }
+        },
+        { state, seed, capture, wait, deadline, message },
+      ),
     ]);
   } finally {
     clearTimeout(hostTimer);
@@ -267,7 +301,7 @@ function computePixelMetrics(png) {
 
   for (let gy = 0; gy < rows; gy += 1) {
     for (let gx = 0; gx < cols; gx += 1) {
-      const offset = ((gy * stepY) * png.width + gx * stepX) * 4;
+      const offset = (gy * stepY * png.width + gx * stepX) * 4;
       const r = png.data[offset];
       const g = png.data[offset + 1];
       const b = png.data[offset + 2];
@@ -517,9 +551,7 @@ export async function inspectPage(page, args) {
 }
 
 function contextOptions(devices, mobile) {
-  return mobile
-    ? { ...devices['iPhone 13'], userAgent: undefined }
-    : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 };
+  return mobile ? { ...devices['iPhone 13'], userAgent: undefined } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 };
 }
 
 function reportPassed(report) {
@@ -538,15 +570,19 @@ export function summarize(report, reportPath) {
   if (report.gpu?.renderer) parts.push(report.gpu.softwareRendered ? 'gpu=SOFTWARE(fps-invalid)' : 'gpu=hardware');
   const metrics = result.metrics;
   if (metrics) {
-    parts.push(`entropy=${metrics.colorEntropyBits} edges=${metrics.edgeDensity} ` +
-      `contrast=${metrics.luminance.contrast} dominant=${metrics.dominantColorShare}`);
+    parts.push(
+      `entropy=${metrics.colorEntropyBits} edges=${metrics.edgeDensity} ` +
+        `contrast=${metrics.luminance.contrast} dominant=${metrics.dominantColorShare}`,
+    );
   }
   if (result.renderBudget) {
-    const over = result.renderBudget.rows.filter((row) => row.ok === false)
-      .map((row) => `${row.metric}:${row.actual}>${row.limit}`);
+    const over = result.renderBudget.rows.filter((row) => row.ok === false).map((row) => `${row.metric}:${row.actual}>${row.limit}`);
     parts.push(over.length ? `over-budget=${over.join(',')}` : 'budget=ok');
   }
-  for (const [field, count] of [['consoleErrors', 'consoleErrorCount'], ['pageErrors', 'pageErrorCount']]) {
+  for (const [field, count] of [
+    ['consoleErrors', 'consoleErrorCount'],
+    ['pageErrors', 'pageErrorCount'],
+  ]) {
     if (report[count] > 0) {
       parts.push(`${field}=${report[count]} first=${JSON.stringify(report[field][0].slice(0, 200))}`);
     }
@@ -565,8 +601,14 @@ async function main() {
   const mode = args.mobile ? 'mobile' : 'desktop';
   const captures = args.manifest
     ? readManifestCaptures(JSON.parse(await readFile(args.manifest, 'utf8')))
-    : [{ mobile: args.mobile, state: args.state, runId: args.runId,
-      reportPath: path.join(args.out, `${args.state ? `${mode}-${args.state}` : mode}.json`) }];
+    : [
+        {
+          mobile: args.mobile,
+          state: args.state,
+          runId: args.runId,
+          reportPath: path.join(args.out, `${args.state ? `${mode}-${args.state}` : mode}.json`),
+        },
+      ];
 
   const { devices } = await loadDependency('@playwright/test');
   const browser = await launchBrowser();
@@ -592,8 +634,7 @@ async function main() {
   if (args.json) console.log(JSON.stringify(args.manifest ? reports : reports[0], null, 2));
 }
 
-if (process.argv[1] && existsSync(process.argv[1]) &&
-    import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((error) => {
     console.error(error);
     process.exitCode = 1;

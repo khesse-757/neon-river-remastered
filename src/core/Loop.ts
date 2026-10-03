@@ -20,7 +20,7 @@ export class Loop {
     cancelAnimationFrame(this.frameId);
   }
 
-  private readonly tick = (time: number) => {
+  private readonly tick = (time: number): void => {
     if (!this.running) return;
     const deltaSeconds = Math.min((time - this.lastTime) / 1000, 0.05);
     this.lastTime = time;

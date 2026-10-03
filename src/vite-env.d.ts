@@ -3,39 +3,46 @@
 interface ThreeGameDiagnostics {
   frame: number;
   elapsed: number;
-  score: number;
-  targetScore: number;
-  complete: boolean;
-  player: {
-    position: { x: number; y: number; z: number };
-    speed: number;
-  };
-  renderer: {
-    calls: number;
-    triangles: number;
-    geometries: number;
-    textures: number;
-  };
-  canvas: {
-    clientWidth: number;
-    clientHeight: number;
-    width: number;
-    height: number;
-    dpr: number;
-  };
+  mode: string;
+  phase: string;
+  resting: boolean;
+  status: string;
+  lossCause: string | null;
+  caught: number;
+  escaped: number;
+  streak: number;
+  fish: number;
+  net: { lane: number; velocity: number };
+  fishStyle: string;
+  audioErrors: number;
+  renderer: { calls: number; triangles: number; geometries: number; textures: number };
+  canvas: { clientWidth: number; clientHeight: number; width: number; height: number; dpr: number };
+  layout: { scale: number; targetW: number; targetH: number; gridW: number; gridH: number };
+  rippleEncoding: string;
+}
+
+interface PaletteReport {
+  texels: number;
+  offPalette: number;
+  colorsUsed: number;
+  paletteSize: number;
 }
 
 interface ThreeGameTestHooks {
-  /** Re-seed the game RNG; all gameplay randomness must flow through it. */
+  /** Seed for the next run; all gameplay randomness flows from it. */
   seed(value: number): void | Promise<void>;
-  /** Acknowledge after setup/assets are ready; throw for unknown states. */
+  /** Acknowledge after setup/assets are ready; throws for unknown states. */
   setState(name: string): { state: string } | Promise<{ state: string }>;
-  /** Stop simulation/state transitions immediately; keep rendering. Await optional synchronization. */
+  /** Stop simulation and animation immediately; keep rendering. */
   setPausedForScreenshot(paused: boolean): void | Promise<void>;
-  /** Stabilize ambient/idle visuals without requiring an unpaused simulation tick. */
+  /** Freeze ambient animation time. */
   setReducedMotion(enabled: boolean): void | Promise<void>;
-  /** Hide debug UI (lil-gui) before capturing. */
+  /** Hide debug UI (lil-gui, path editor) before capturing. */
   hideDebugUi(hidden: boolean): void | Promise<void>;
+  /** Let the built-in fish tracker drive the net (smoke tests, captures). */
+  setAutoplay(enabled: boolean): void;
+  /** Counts texels of the final low-res frame that are not palette colors. */
+  paletteReport(): PaletteReport;
 }
 
 interface Window {
