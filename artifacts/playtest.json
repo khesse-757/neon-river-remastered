@@ -1,0 +1,91 @@
+{
+  "oracle": {
+    "bot": "oracle",
+    "seeds": 20,
+    "winRate": 0.95,
+    "eelLosses": 1,
+    "escapedLosses": 0,
+    "timeouts": 0,
+    "winTimeMedian": 118.3,
+    "winTimeP25": 110,
+    "winTimeP75": 121.5,
+    "firstCatchMedian": 6.73,
+    "bestStreakMedian": 116,
+    "accuracyMedian": 1,
+    "escapedMedianInWins": 0,
+    "lossPhases": {
+      "first-spark": 1
+    },
+    "paceCurve": {
+      "15": 16,
+      "30": 36,
+      "40": 62,
+      "60": 97,
+      "75": 119,
+      "90": 150,
+      "105": 185,
+      "120": 200,
+      "135": 200,
+      "150": 200,
+      "180": 200
+    },
+    "paceCurveWinners": {
+      "15": 16,
+      "30": 36,
+      "40": 62,
+      "60": 97,
+      "75": 119,
+      "90": 150,
+      "105": 185,
+      "120": 200,
+      "135": 200,
+      "150": 200,
+      "180": 200
+    }
+  },
+  "human": {
+    "bot": "human-like (220 ms, aim noise 0.03)",
+    "seeds": 40,
+    "winRate": 0.475,
+    "eelLosses": 5,
+    "escapedLosses": 16,
+    "timeouts": 0,
+    "winTimeMedian": 123.5,
+    "winTimeP25": 120.3,
+    "winTimeP75": 131.3,
+    "firstCatchMedian": 6.73,
+    "bestStreakMedian": 27,
+    "accuracyMedian": 0.896,
+    "escapedMedianInWins": 14,
+    "lossPhases": {
+      "first-spark": 12,
+      "lantern-koi": 9
+    },
+    "paceCurve": {
+      "15": 13,
+      "30": 32,
+      "40": 54,
+      "60": 83,
+      "75": 104,
+      "90": 127,
+      "105": 153,
+      "120": 173,
+      "135": 188,
+      "150": 196,
+      "180": 196
+    },
+    "paceCurveWinners": {
+      "15": 13,
+      "30": 35,
+      "40": 55,
+      "60": 91,
+      "75": 110,
+      "90": 135,
+      "105": 167,
+      "120": 187,
+      "135": 200,
+      "150": 200,
+      "180": 200
+    }
+  }
+}

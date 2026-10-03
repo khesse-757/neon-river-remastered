@@ -1,0 +1,127 @@
+// Balance playtest: oracle and human-like bots over many seeds, with a pace curve (lb vs time).
+//   npm run playtest            (prints a report, writes artifacts/playtest.json)
+//   npm run playtest -- --oracle 20 --human 60
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { RIVER } from '../src/data/river';
+import { HumanBot } from '../src/sim/bots/human';
+import { oracleIntent } from '../src/sim/bots/oracle';
+import { DEFAULT_CONFIG } from '../src/sim/config';
+import type { NetIntent } from '../src/sim/net';
+import { River } from '../src/sim/river';
+import { Sim } from '../src/sim/sim';
+
+const DT = 1 / 60;
+const LIMIT = 360;
+const MARKS = [15, 30, 40, 60, 75, 90, 105, 120, 135, 150, 180];
+const arg = (name: string, fallback: number): number => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? Number(process.argv[i + 1]) : fallback;
+};
+
+interface Run {
+  seed: number;
+  won: boolean;
+  time: number;
+  cause: string | null;
+  phase: string;
+  caught: number;
+  escaped: number;
+  bestStreak: number;
+  accuracy: number;
+  firstCatch: number | null;
+  curve: number[];
+}
+
+const river = new River(RIVER);
+const median = (values: number[]): number => {
+  if (values.length === 0) return NaN;
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)] ?? NaN;
+};
+const quantile = (values: number[], q: number): number => {
+  if (values.length === 0) return NaN;
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(s.length * q))] ?? NaN;
+};
+
+function play(seed: number, pick: (sim: Sim) => NetIntent): Run {
+  const sim = new Sim({ seed, river, config: DEFAULT_CONFIG });
+  const curve: number[] = [];
+  let firstCatch: number | null = null;
+  while (sim.state.status === 'playing' && sim.state.time < LIMIT) {
+    sim.step(DT, pick(sim));
+    sim.drainEvents();
+    if (firstCatch === null && sim.state.caught > 0) firstCatch = sim.state.time;
+    while (curve.length < MARKS.length && sim.state.time >= (MARKS[curve.length] ?? Infinity)) curve.push(sim.state.caught);
+  }
+  // A finished run holds its final weight for the rest of the curve.
+  while (curve.length < MARKS.length) curve.push(sim.state.status === 'won' ? sim.config.winWeight : sim.state.caught);
+  const s = sim.state;
+  return {
+    seed,
+    won: s.status === 'won',
+    time: s.time,
+    cause: s.lossCause,
+    phase: s.phase.id,
+    caught: s.caught,
+    escaped: s.escaped,
+    bestStreak: s.bestStreak,
+    accuracy: s.catches / Math.max(1, s.catches + s.misses),
+    firstCatch,
+    curve,
+  };
+}
+
+function summarize(name: string, runs: Run[]): Record<string, unknown> {
+  const wins = runs.filter((r) => r.won);
+  const losses = runs.filter((r) => !r.won);
+  const byPhase: Record<string, number> = {};
+  for (const r of losses) byPhase[r.phase] = (byPhase[r.phase] ?? 0) + 1;
+  const summary = {
+    bot: name,
+    seeds: runs.length,
+    winRate: +(wins.length / runs.length).toFixed(3),
+    eelLosses: losses.filter((r) => r.cause === 'eel').length,
+    escapedLosses: losses.filter((r) => r.cause === 'escaped').length,
+    timeouts: losses.filter((r) => r.cause === null).length,
+    winTimeMedian: +median(wins.map((r) => r.time)).toFixed(1),
+    winTimeP25: +quantile(
+      wins.map((r) => r.time),
+      0.25,
+    ).toFixed(1),
+    winTimeP75: +quantile(
+      wins.map((r) => r.time),
+      0.75,
+    ).toFixed(1),
+    firstCatchMedian: +median(runs.map((r) => r.firstCatch ?? LIMIT)).toFixed(2),
+    bestStreakMedian: median(runs.map((r) => r.bestStreak)),
+    accuracyMedian: +median(runs.map((r) => r.accuracy)).toFixed(3),
+    escapedMedianInWins: median(wins.map((r) => r.escaped)),
+    lossPhases: byPhase,
+    // Median lb caught at each time mark, over all runs (wins hold at 200).
+    paceCurve: Object.fromEntries(MARKS.map((t, i) => [t, median(runs.map((r) => r.curve[i] ?? 0))])),
+    paceCurveWinners: Object.fromEntries(MARKS.map((t, i) => [t, median(wins.map((r) => r.curve[i] ?? 0))])),
+  };
+  return summary;
+}
+
+const oracleSeeds = arg('oracle', 20);
+const humanSeeds = arg('human', 60);
+const oracle = summarize(
+  'oracle',
+  Array.from({ length: oracleSeeds }, (_, i) => play(i + 1, (sim) => oracleIntent(sim.state, sim.config))),
+);
+const human = summarize(
+  'human-like (220 ms, aim noise 0.03)',
+  Array.from({ length: humanSeeds }, (_, i) => {
+    const bot = new HumanBot(i + 1);
+    return play(i + 1, (sim) => bot.intent(sim.state, sim.config));
+  }),
+);
+
+mkdirSync('artifacts', { recursive: true });
+writeFileSync('artifacts/playtest.json', JSON.stringify({ oracle, human }, null, 2) + '\n');
+for (const s of [oracle, human]) {
+  console.log(`\n== ${String(s.bot)} (${String(s.seeds)} seeds) ==`);
+  console.log(JSON.stringify(s, null, 1));
+}

@@ -18,5 +18,5 @@
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src", "tests", "playwright.config.ts", "vitest.config.ts", "vite.config.ts"]
+  "include": ["src", "tests", "playwright.config.ts", "vitest.config.ts", "vite.config.ts", "scripts/playtest.ts"]
 }

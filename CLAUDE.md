@@ -100,7 +100,9 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
   — captures at exactly 1440×900 and 390×844 through the test hooks (dev server must be running)
 - `npm run inspect:canvas -- --manifest artifacts/evidence.json --url http://127.0.0.1:5188 --seed 42`
   — canvas inspector; then `python3 .claude/skills/threejs-game-director/scripts/check_evidence.py . --manifest artifacts/evidence.json`
-- Bot playtest: not built yet (Gate 2). `src/sim/bots/tracker.ts` is only a capture/smoke helper.
+- `npm run playtest -- --oracle 20 --human 60` — bot playtest: oracle (perfect information, real net cap)
+  and human-like (220 ms reaction, aim noise) over fixed seeds; prints win rate, loss causes, time to
+  200 lb and the pace curve (median lb at 15…180 s), and writes `artifacts/playtest.json`
 
 Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
 `phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `koi-scoop`, `eel-near`,
