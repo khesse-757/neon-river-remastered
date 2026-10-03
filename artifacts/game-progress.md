@@ -25,7 +25,7 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 Stopped for Kyle's review after round 3. Do not merge PR #2 or start Gate 2 until he says so.
 
 ### Decisions pending from Kyle
-1. **Spawn gap vs win time.** Still Water spawns every 0.9 s (then 0.74 / 0.62 / 0.5 s), not the ~0.5 s he asked for everywhere. With 8% koi and 5% eels, a 0.5 s period supplies 2.5 lb/s: first speed-up at 0:18, win near 1:20. I kept the 2:00–2:30 win and his Still Water mix. He can feel the denser version with `?tune` (density ×1.8). Options if he wants 0.5 s: accept ~1:20 wins, or cut koi / add eels early.
+1. **Lulls vs win time.** The stream is now S-runs (2–3.5 fish a second) with sparser water between them (mean gaps 1.02 / 0.88 / 0.76 / 0.54 s, each ±30%), not the ~0.5 s everywhere he first asked for. The weight budget forces the trade: 8% koi and 5% eels at 0.5 s would supply 2.5 lb/s and end the night near 1:20. He can feel a denser river with `?tune` (density ×1.8). Round 3b is his own answer to this ("always evenly spaced"); he should say whether the lulls now read as rhythm or as down time.
 2. **Difficulty is fragile at the end.** Human-like win rate is 60% (57% over 400 seeds), at the top of the 35–60% band, and Bank to Bank's period moves it ~12 points per 0.01 s (0.48 s → 32%, 0.52 s → 79%). The cliff is eel deaths. A real-player check matters more than more bot tuning.
 3. **Motif:** ripple is the default; he will choose on `?audition` now that it plays. Players can switch in Advanced audio.
 4. **Audio by ear:** nobody has listened. Levels, routing, envelopes and non-silence are measured; clash, calmness and click-freeness by ear are not.
@@ -55,7 +55,7 @@ Stopped for Kyle's review after round 3. Do not merge PR #2 or start Gate 2 unti
 - The fresh-eyes reviewer saw 7516c32. The fixes for its findings (fd225bb), the removal of the neon surge and tablet pulse (aced2b7) and the new videos have not been re-reviewed; they are covered by unit tests, e2e (also under software GL) and my own captures.
 
 ### Environment note
-- A vite dev server that this session did not start is listening on 5188 from the main checkout (PID 17287). Left alone; Playwright reuses it locally.
+- A vite dev server that this session did not start is listening on 5188 from the main checkout (Kyle is playing on it). Left alone; Playwright reuses it locally.
 
 ## Gate 1.5, round 3b (Kyle playing the build, 2026-10-03) — S-runs, modes, HUD moves
 
@@ -67,19 +67,26 @@ Kyle's notes while playing: fish were always evenly spaced in time; he wants a p
 - **Modes** (`src/sim/modes.ts`): Normal and Zen (no eels; an eel's place is left empty, never two in a row). Title-screen button, saved under `neonriver2_mode`, `?mode=zen`, hook `setGameMode`.
 - **HOME** on the pause panel and results. **Desktop HUD:** gear and mute at the painting's top-left; the score tablet below the painting, or beside its foot in the left gutter when the window has no room below.
 
-Bots after this change (my runs of `npm run playtest`, 100 oracle / 300 human-like seeds; the playtester agent's independent run is recorded below when it returns):
+Bots after this change (my runs of `npm run playtest`, 100 oracle / 300 human-like seeds; the playtester agent's independent run on 019f214 agreed and is summarised below):
 
 | | Normal | Zen (60 / 200 seeds) |
 | --- | --- | --- |
 | Oracle | 100%, 0 eel contacts | 100% |
-| Human-like win rate | 60% (73 eel / 48 escaped losses) | 100% |
+| Human-like win rate | 60% at 019f214; 50% after the fixes below | 100% |
 | Human-like median win (p25–p75) | 2:09 (2:03–2:15) | 2:03 |
 | Speed-ups, human-like median | 0:30 / 1:01 / 1:32 | 0:30 / 1:01 / 1:31 |
 | Longest gap without a spawn | 1.33 s | 2.6 s |
 | S-runs per night / fish in them | 8 / 82 | 7 / 75 |
 | Tightest gap | 0.28 s | 0.28 s |
 
-Open from this change: net zone empty ~6.9 s per night in Normal (was 0.55 s with fixed periods; the sparser water between runs), and gaps up to 2.6 s in Zen (about 21 s a night with nothing near the net). Kyle should say whether the lulls between runs feel like rhythm or like down time. Zen keeps the 20-lb escape rule (my call; he asked only for "without getting shocked").
+Open from this change: net zone empty ~6.9 s per night in Normal (was 0.55 s with fixed periods; the sparser water between runs, in spells of at most 0.55 s), and gaps up to 2.6 s in Zen (about 21 s a night with nothing near the net). Kyle should say whether the lulls between runs feel like rhythm or like down time. Zen keeps the 20-lb escape rule (my call; he asked only for "without getting shocked"); the human-like bot never loses a Zen night.
+
+### Playtester and reviewer on 019f214, and the fixes after them (not re-reviewed)
+- **Playtester:** every brief target passed (oracle 100% both modes, human-like 59.7%, median win 2:09, speed-ups 0:30 / 1:01 / 1:32). Runs are catchable (oracle ≥ 97.7% of run fish; human-like 98 / 94 / 90 / 84% by stage). Run-planted eels are about a tenth of the eels but 36% of eel deaths. It also found: the current had finished rising before the speed-up's run reached the net; a speed-up during a run chained a second run onto it (47% of nights); a run starting from a Bank to Bank burst had its first fish clamped to mid-river (9% of nights); a few eel/fish pairs arrived 0.33–0.35 s apart after a speed-up compressed them.
+- **Reviewer (round 6):** no blockers, 2 majors, both from the desktop-HUD change on non-target viewports: at 320×568 the gear and mute moved inside the painting and covered PAUSED / RESUME / the sign; at 768×1024 the tablet and the sign overlapped. Minors: stacked buttons' hit areas overlapped at 1 px per texel; joined runs; clamped run starts; a Zen win unlocked Hard River; streaks not discernible at a speed-up; stale docs.
+- **Fixed since** (tuning recorded here): "wide screen" now means a side gutter ≥ 108 texels (320×568 and tablet portrait are back to the screen corner); stacked buttons are ≥ 46 CSS px apart; a speed-up during a run lengthens it by 4 fish; a run starting from a burst starts at the bank; `speedEase` 1.0 → 3.0 s (the current is still rising while the run is at the net); eel time margin 0.38 → 0.43 s; that margin made Bank to Bank easier (64% wins), so its mean gap went 0.56 → 0.54 s and its run eel chance 0.12 → 0.15; a Zen win no longer unlocks Hard River.
+- **After those fixes** (my run, 100 oracle / 300 human-like): oracle 100% with no eel contact; human-like 50% wins (93 eel / 57 escaped losses, 134 of 150 in Bank to Bank), median win 2:12, speed-ups 0:30 / 1:01 / 1:32, longest spawn gap 1.33 s, 8 runs and 81 run fish a night. Zen oracle 100%.
+- **Left open:** current streaks are faint at a speed-up (dimmed when Kyle asked for the neon surge to go; the sign and stinger carry it); tablet portrait still crowds the top-left HUD; eel hook states still spawn an eel in Zen (test hooks only); the in-game audio e2e runs on the desktop project only; S-run feel (reads as an S, eel-in-run readability) is unjudged by anyone but Kyle.
 
 ## Gate 1.5, round 3 (Kyle's notes of 2026-10-03) — the dance, calmer audio
 
@@ -135,7 +142,7 @@ Sensitivity (400 human-like seeds, Bank to Bank period): 0.46 s 23% · 0.48 s 32
 - Fisherman hops and calls "A FULL NET!" on a win. `?tune` dock top-right, collapses on any touch outside it.
 
 ### Verification
-- `npm run check`: lint, typecheck, 38 unit tests (29 sim, 3 settings, 6 melody), secret scan. Build passes.
+- `npm run check`: lint, typecheck, 42 unit tests (33 sim, 3 settings, 6 melody), secret scan. Build passes.
 - Playwright (5 tests; also run with `PW_SOFTWARE_GL=1`): smoke on desktop and mobile (corner controls on every screen, settings persistence, 44 px targets, touch scroll vs fader, knob accuracy, pause panel under 100 draw calls) and `audio.spec.ts` (18 audition buttons on a clean and on a fully muted profile; in-game start sting, catch, eel shock and win fanfare, one soloed at a time). The in-game test was mutation-checked: silencing each of the four sounds makes it fail.
 - Performance (production preview, Apple GPU): 59.2 fps desktop, 59.3 fps mobile-capped, ≤ 68 draw calls in play, 90 on the results card.
 

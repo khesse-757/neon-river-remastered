@@ -578,11 +578,13 @@ export class Game {
         this.lossCause = null;
         this.win = 0.0001;
         this.audio.winFanfare();
-        try {
-          localStorage.setItem(UNLOCK_STORE, '1');
-        } catch {
-          /* storage unavailable */
-        }
+        // Hard River is earned on a night with eels in it.
+        if (this.gameMode.unlocks)
+          try {
+            localStorage.setItem(UNLOCK_STORE, '1');
+          } catch {
+            /* storage unavailable */
+          }
         break;
     }
   }
@@ -1228,8 +1230,10 @@ export class Game {
     text('title-rule-3', title, this.gameMode.rule, at(0.42) + 22, '#c5e1e8');
     button('start', title, 'TAP TO FISH', at(0.58));
     // The mode button cycles through the ways to play.
-    button('mode', title, `MODE: ${this.gameMode.name.toUpperCase()}`, at(0.58) + 30);
-    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 60, '#99c8cd');
+    // Stacked buttons are a full 44 px touch target apart, however small the texel.
+    const stack = Math.max(30, Math.ceil(46 / this.texelCss()));
+    button('mode', title, `MODE: ${this.gameMode.name.toUpperCase()}`, at(0.58) + stack);
+    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + stack + 30, '#99c8cd');
 
     // Pause and settings are the same panel; on the title the gear opens it without a run.
     const paused = this.mode === 'paused';
@@ -1280,7 +1284,7 @@ export class Game {
           `ACCURACY ${accuracy}%`,
           `BEST STREAK ${s.bestStreak}`,
           `RATING - ${rating}`,
-          'HARD RIVER UNLOCKED',
+          ...(this.gameMode.unlocks ? ['HARD RIVER UNLOCKED'] : [`${this.gameMode.name.toUpperCase()} MODE`]),
         ]
       : [`${s.caught} LB CAUGHT - ${s.escaped} LB ESCAPED`, `BEST STREAK ${s.bestStreak}`];
     for (let i = 0; i < 5; i++) {
@@ -1289,7 +1293,7 @@ export class Game {
     }
     button('retry', over, 'FISH AGAIN', at(0.22) + 36 + lines.length * 11);
     // HOME goes back to the title screen: beside RESUME when paused, under FISH AGAIN on the results.
-    button('home', paused || over, 'HOME', paused ? headY + 21 : at(0.22) + 66 + lines.length * 11, paused ? 32 : 0);
+    button('home', paused || over, 'HOME', paused ? headY + 21 : at(0.22) + 36 + stack + lines.length * 11, paused ? 32 : 0);
 
     // Settings (gear) and mute stay in the top-left corner, inside the safe area, on every screen:
     // title, play, pause, the win and the results. Each is drawn at least 44 CSS px square, so art,
@@ -1319,7 +1323,9 @@ export class Game {
   private cornerTexels(): { x: number; y: number } {
     const { originX, originY } = this.view.layout;
     const safe = this.safeTexels();
-    const wide = originX > 40;
+    // Wide means a real side gutter (room for the score tablet beside the painting), not the
+    // narrow margins of a small phone or a tablet in portrait.
+    const wide = originX >= 108;
     return { x: Math.max(safe.left, wide ? originX : 0) + 3, y: Math.max(safe.top, wide ? originY : 0) + 3 };
   }
 
@@ -1465,6 +1471,8 @@ export class Game {
       setAudioBeds: (on: boolean) => this.audio.setBeds(on),
       soloAudio: (name: string | null) => this.audio.setSolo(name),
       setGameMode: (id: string) => {
+        this.frozen = false;
+        this.startRun();
         this.setMode('title');
         this.setGameMode(id);
       },

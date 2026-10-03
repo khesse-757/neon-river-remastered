@@ -104,22 +104,24 @@ bank, mixed with fast zigzags and eels dropped into the chain.
 | 1 | Still Water | ×1 (3.0 s far bend → net) | 1.02 s | 8–10, 0.50 → 0.38 s, no eels | 4.0 s (2.6 s) | none | 6.7% / 5 fish | 8% |
 | 2 | Quickening | ×1.12 | 0.88 s | 9–11, 0.46 → 0.34 s, eel 5% | 3.0 s (2.3 s) | 0.12 /s | 22% / 2 fish | 8% |
 | 3 | Neon Rapids | ×1.25 | 0.76 s | 10–12, 0.42 → 0.31 s, eel 9% | 1.8 s (2.0 s) | 0.30 /s | 40% / 1 fish | 8% |
-| 4 | Bank to Bank | ×1.40 | 0.56 s | 10–13, 0.38 → 0.29 s, eel 12% | 1.15 s (1.8 s) | 0.40 /s | 50% / none | 7% |
+| 4 | Bank to Bank | ×1.40 | 0.54 s | 10–13, 0.38 → 0.29 s, eel 15% | 1.15 s (1.8 s) | 0.40 /s | 50% / none | 7% |
 
 **The stream is never evenly spaced.** Two rhythms alternate:
 
 - **S-runs.** A tight chain of 1-lb fish snaking bank to bank, like the
   original's stream: the gaps between its fish shrink and its sweep quickens
-  as it goes. One arrives with every speed-up, so the current is picking up
-  while the player is catching it, and runs recur every 15–22 s (about eight a
-  night, roughly 80 of the night's fish). From Quickening on, an eel may be
+  as it goes. One arrives with every speed-up, so the current (which takes several seconds to
+  pick up) is still rising while the player is catching it. A speed-up that
+  lands during a run lengthens that run by four fish instead of starting a
+  second one on its tail. Runs also recur 15–22 s after the last one was
+  queued: about eight a night, roughly 80 of the night's fish. From Quickening on, an eel may be
   planted in the S to steer around (never its first two fish or its last).
 - **Between runs** the gaps wander: each is the stage's mean gap times a
   random 0.7–1.3, with koi and eels in the mix. An eel always keeps at least
-  0.38 s from its neighbours in time.
+  0.43 s from its neighbours in time.
 
 - **No down time:** no rests and no separate phases; at the shipped pace a
-  spawn is never skipped, so the longest gap without a spawn is 1.3 × the stage's mean gap (1.33 s in Still Water, 0.73 s in Bank to Bank); a fish is
+  spawn is never skipped, so the longest gap without a spawn is 1.3 × the stage's mean gap (1.33 s in Still Water, 0.70 s in Bank to Bank); a fish is
   nearly always in the half of the river nearest the net (the lulls are the
   water between S-runs). A night starts with the
   river already running: the first fish reaches the net at about 1.5 s.

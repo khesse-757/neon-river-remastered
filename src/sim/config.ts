@@ -161,8 +161,8 @@ export const STAGES: readonly StageSpec[] = [
     id: 'bank-to-bank',
     name: 'Bank to Bank',
     speed: 1.405,
-    period: 0.56,
-    run: { fish: [10, 13], period: [0.38, 0.29], crossing: 1.8, eelChance: 0.12, every: [15, 20] },
+    period: 0.54,
+    run: { fish: [10, 13], period: [0.38, 0.29], crossing: 1.8, eelChance: 0.15, every: [15, 20] },
     crossing: 1.15,
     swingMin: 0.4,
     reversals: 0.4,
@@ -180,8 +180,9 @@ export const DEFAULT_CONFIG: SimConfig = {
   eels: true,
   spacing: [0.7, 1.3],
   travel: 3.0,
-  // The current picks up gradually, while the speed-up's S-run is coming down the river.
-  speedEase: 1.0,
+  // The current picks up over several seconds: it is still rising while the speed-up's S-run is
+  // at the net (the run's fish arrive 3-8 s after the speed-up).
+  speedEase: 3.0,
   banks: [0.08, 0.92],
   prefillSeconds: 1.4,
   tune: { speed: 1, density: 1, sweep: 1, eel: 1 },

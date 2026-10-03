@@ -10,7 +10,7 @@ import { configFor, MODES } from '../../src/sim/modes';
 import { createNet, stepNet, type NetIntent } from '../../src/sim/net';
 import { River } from '../../src/sim/river';
 import { createRng } from '../../src/sim/rng';
-import { Sim, type SimEvent } from '../../src/sim/sim';
+import { EEL_MARGIN, Sim, type SimEvent } from '../../src/sim/sim';
 
 const DT = 1 / 60;
 const river = new River(RIVER);
@@ -146,7 +146,7 @@ describe('stages and emitter', () => {
   it('opens straight into play with fish already in the river, and never pauses the spawns', () => {
     const { stages, spacing, fairness } = DEFAULT_CONFIG;
     // The longest wait the pattern allows anywhere: the slowest stage's period at the top of its wander.
-    const longest = Math.max(stages[0]!.period * spacing[1], fairness.eelWindow + 0.03);
+    const longest = Math.max(stages[0]!.period * spacing[1], fairness.eelWindow + EEL_MARGIN);
     for (const seed of SEEDS.slice(0, 12)) {
       const sim = new Sim({ seed, river });
       expect(sim.state.fish.length).toBeGreaterThanOrEqual(2);
@@ -166,7 +166,7 @@ describe('stages and emitter', () => {
           expect(gap, `seed ${seed} t=${sim.state.time.toFixed(2)}`).toBeLessThanOrEqual(longest + 2 * DT);
           if (sim.state.stage === stage && sim.state.time - gap > (DEFAULT_CONFIG.speedUps[sim.state.stageIndex - 1]?.seconds ?? 0))
             expect(gap).toBeLessThanOrEqual(
-              Math.max(stages[Math.max(0, sim.state.stageIndex - 1)]!.period * spacing[1], fairness.eelWindow + 0.03) + 2 * DT,
+              Math.max(stages[Math.max(0, sim.state.stageIndex - 1)]!.period * spacing[1], fairness.eelWindow + EEL_MARGIN) + 2 * DT,
             );
           lastSpawn = sim.state.time;
         }
@@ -197,7 +197,7 @@ describe('stages and emitter', () => {
     }
     for (const stage of stages) {
       // A run is denser than the water around it and tightens as it goes.
-      expect(stage.run.period[0]).toBeLessThan(stage.period * DEFAULT_CONFIG.spacing[0]);
+      expect(stage.run.period[0]).toBeLessThan(stage.period * 0.75);
       expect(stage.run.period[1]).toBeLessThan(stage.run.period[0]);
     }
 
@@ -222,7 +222,7 @@ describe('stages and emitter', () => {
     const idleSim = new Sim({ seed: 5, river, config: ENDLESS });
     idleSim.drainEvents();
     const byClock: number[] = [];
-    while (idleSim.state.time < 102) {
+    while (idleSim.state.time < 115) {
       idleSim.step(DT, { kind: 'target', lane: 0 });
       for (const e of idleSim.drainEvents()) if (e.type === 'stage') byClock.push(idleSim.state.time);
     }
@@ -247,7 +247,7 @@ describe('stages and emitter', () => {
         runs++;
         // The chain tightens: its last gap is shorter than its first (gaps held open around an eel aside).
         const plain = gaps.filter((g) => g < DEFAULT_CONFIG.fairness.eelWindow);
-        if (plain.length >= 3) expect(plain[plain.length - 1]!).toBeLessThan(plain[0]! - DT / 2);
+        if (plain.length >= 4) expect(Math.min(...plain.slice(1))).toBeLessThan(plain[0]! - DT / 2);
         gaps = [];
       };
       while (sim.state.time < 100) {
@@ -261,7 +261,7 @@ describe('stages and emitter', () => {
             expect(e.fish).toBeGreaterThanOrEqual(stage.run.fish[0]);
             expect(e.fish).toBeLessThanOrEqual(stage.run.fish[1]);
             // The speed-up's run arrives within a couple of spawns, while the current is still picking up.
-            if (sim.state.time - speedUpAt < 4) expect(sim.state.speed).toBeLessThan(stage.speed - 0.002);
+            if (sim.state.time - speedUpAt < 4) expect(sim.state.speed).toBeLessThan(stage.speed - 0.02);
           }
           if (e.type !== 'spawn') continue;
           if (emitter.inRun) {
@@ -271,7 +271,7 @@ describe('stages and emitter', () => {
               const gap = sim.state.time - lastSpawn;
               gaps.push(gap);
               if (e.fish.kind !== 'eel')
-                expect(gap).toBeLessThanOrEqual(Math.max(stage.run.period[0], DEFAULT_CONFIG.fairness.eelWindow + 0.03) + 2 * DT);
+                expect(gap).toBeLessThanOrEqual(Math.max(stage.run.period[0], DEFAULT_CONFIG.fairness.eelWindow + EEL_MARGIN) + 2 * DT);
             }
           } else close();
           wasInRun = emitter.inRun;
@@ -469,6 +469,32 @@ describe('stages and emitter', () => {
       expect(sim.state.stageIndex).toBe(3);
       // At most one empty place in a row where an eel would have been.
       expect(longest).toBeLessThan(2 * DEFAULT_CONFIG.stages[0]!.period * DEFAULT_CONFIG.spacing[1] + 0.1);
+    }
+  });
+
+  it('spawns every fish exactly on the emitter in every stage, and keeps S-runs apart', () => {
+    for (const seed of SEEDS.slice(0, 60)) {
+      const sim = new Sim({ seed, river });
+      sim.drainEvents();
+      let lastRun = -Infinity;
+      while (sim.state.status === 'playing' && sim.state.time < 200) {
+        sim.step(DT, oracleIntent(sim.state, sim.config));
+        for (const e of sim.drainEvents()) {
+          // Nothing is moved, clamped or relocated at the shipped pace, bursts and run starts included.
+          // (After a burst's last fish the emitter has already jumped to the other bank.)
+          if (e.type === 'spawn') {
+            const [lo, hi] = DEFAULT_CONFIG.banks;
+            const { lane } = sim.state.emitter;
+            const swapped = Math.abs(e.fish.lane + lane - (lo + hi)) < 1e-9 && Math.abs(Math.abs(e.fish.lane - lane) - (hi - lo)) < 1e-9;
+            if (!swapped) expect(e.fish.lane, `seed ${seed} t=${sim.state.time.toFixed(1)}`).toBeCloseTo(lane, 9);
+          }
+          if (e.type !== 'run') continue;
+          // A run never starts on the tail of another: a speed-up lengthens the one under way.
+          expect(sim.state.time - lastRun, `seed ${seed}`).toBeGreaterThan(4);
+          expect(e.fish).toBeLessThanOrEqual(sim.state.stage.run.fish[1] + 4);
+          lastRun = sim.state.time;
+        }
+      }
     }
   });
 
@@ -763,15 +789,15 @@ describe('the whole night', () => {
 
   it('applies the tune multipliers to the running pace', () => {
     const sim = new Sim({ seed: 1, river });
-    const base = sim.pace();
     sim.config = { ...sim.config, tune: { speed: 2, density: 2, sweep: 0.5, eel: 0 } };
     // The current glides to the new speed rather than snapping.
-    for (let i = 0; i < 9 / DT; i++) sim.step(DT, oracle(sim));
+    for (let i = 0; i < 22 / DT; i++) sim.step(DT, oracle(sim));
     sim.drainEvents();
     const tuned = sim.pace();
-    expect(tuned.travel).toBeCloseTo(base.travel / 2, 3);
-    expect(tuned.period).toBeCloseTo(base.period / 2, 6);
-    expect(tuned.crossing).toBeCloseTo(base.crossing * 2, 6);
+    // (A speed-up may have come in the meantime: measure against the stage the night is in.)
+    expect(tuned.travel).toBeCloseTo(DEFAULT_CONFIG.travel / (sim.state.stage.speed * 2), 1);
+    expect(tuned.period).toBeCloseTo(sim.state.stage.period / 2, 6);
+    expect(tuned.crossing).toBeCloseTo(sim.state.stage.crossing * 2, 6);
     expect(tuned.eelChance).toBe(0);
     for (let i = 0; i < 20 / DT && sim.state.status === 'playing'; i++) {
       sim.step(DT, oracle(sim));

@@ -123,6 +123,8 @@ export interface SimOptions {
 
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 const WARM_STEP = 1 / 60;
+/** Extra seconds an eel keeps from its neighbours beyond the fairness window. */
+export const EEL_MARGIN = 0.08;
 /** A swing never covers less than this, so the chain always moves. */
 const MIN_SWING = 0.18;
 
@@ -270,8 +272,12 @@ export class Sim {
       s.stageIndex += 1;
       s.stage = stages[s.stageIndex] as StageSpec;
       this.events.push({ type: 'stage', stage: s.stage, index: s.stageIndex });
-      // Every speed-up brings an S-run: the current picks up while the player is catching it.
-      s.emitter.runQueued = this.runSize();
+      // Every speed-up brings an S-run: the current picks up while the player is catching it. If a
+      // run is already coming down, it is lengthened instead of a second one starting on its tail.
+      if (s.emitter.runLeft > 0) {
+        s.emitter.runLeft += 4;
+        s.emitter.runSize += 4;
+      } else s.emitter.runQueued = this.runSize();
       s.emitter.runIn = this.range(s.stage.run.every);
     }
     const target = s.stage.speed * tune.speed;
@@ -333,7 +339,8 @@ export class Sim {
     const [first, last] = stage.run.period;
     const gap = (to.run !== null ? first + (last - first) * to.run : stage.period * wander) / tune.density;
     // An eel keeps clear of its neighbours in time, so nothing has to be moved sideways to be fair.
-    return from.eel || to.eel ? Math.max(gap, fairness.eelWindow + 0.03) : gap;
+    // (The margin over the window covers a speed-up closing the gap while both are in the river.)
+    return from.eel || to.eel ? Math.max(gap, fairness.eelWindow + EEL_MARGIN) : gap;
   }
 
   /** Begin an eased swing from the emitter's lane toward one bank. */
@@ -440,6 +447,7 @@ export class Sim {
     }
     if (emitter.spawnTimer <= 0) {
       const slot = emitter.next;
+      let fromBurst = false;
       if (slot.run !== null && !emitter.inRun) {
         // The run starts here. A burst is dropped and the sweep leaves its bank; a swing already
         // under way simply carries on (no kink in the chain) and no longer turns back early.
@@ -450,12 +458,14 @@ export class Sim {
         emitter.pinBursts = 0;
         emitter.burstPending = false;
         emitter.reverseAt = Infinity;
+        fromBurst = wasPinned;
         if (wasPinned) this.startSwing(1);
         this.events.push({ type: 'run', fish: emitter.runSize });
       } else if (slot.run === null) emitter.inRun = false;
       emitter.runK = slot.run ?? 0;
       const pinned = emitter.pinFish > 0;
-      if (slot.kind !== null) this.spawn(slot.kind, emitter.lane, pinned);
+      // A run that begins from a burst's bank starts at that bank: like a swap, it is the pattern.
+      if (slot.kind !== null) this.spawn(slot.kind, emitter.lane, pinned || fromBurst);
       emitter.spawnTimer += emitter.gap;
       emitter.next = emitter.afterNext;
       emitter.telegraphed = emitter.afterTelegraphed;

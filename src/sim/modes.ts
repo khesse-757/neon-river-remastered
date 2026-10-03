@@ -9,6 +9,8 @@ export interface GameMode {
   readonly name: string;
   /** The title screen's third rule line in this mode. */
   readonly rule: string;
+  /** A win in this mode unlocks Hard River. */
+  readonly unlocks: boolean;
   readonly apply: (base: SimConfig) => SimConfig;
 }
 
@@ -17,6 +19,7 @@ export const MODES: readonly GameMode[] = [
     id: 'normal',
     name: 'Normal',
     rule: 'NEVER NET AN ELECTRIC EEL',
+    unlocks: true,
     apply: (base) => base,
   },
   {
@@ -25,6 +28,7 @@ export const MODES: readonly GameMode[] = [
     id: 'zen',
     name: 'Zen',
     rule: 'NO EELS TONIGHT. JUST FISH',
+    unlocks: false,
     apply: (base) => ({ ...base, eels: false }),
   },
 ];
