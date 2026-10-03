@@ -417,7 +417,7 @@ export class FishSchool {
                // Continuous depth fog: deeper fish sink into the river's color; no surface pop.
                // Brightness discipline: a fish's own surface stays under the water's brightest glints;
                // only self-light (eel stripes, koi gleam) may go above.
-               gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(0.74) + uGlow * vEmit * vLook.y);
+               gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(0.58) + uGlow * vEmit * vLook.y);
                gl_FragColor.rgb = mix(gl_FragColor.rgb, uFog, vLook.x);
                gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.25), vLook.z);`,
             );

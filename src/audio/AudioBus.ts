@@ -1,5 +1,5 @@
 import { createRng } from '../sim/rng';
-import { DEFAULT_THEME, degreeToHz, melodyNote, missFall, quantizeOnset, themeById, type CueNote, type Theme } from './melody';
+import { DEFAULT_THEME, degreeToHz, melodyNote, missFall, quantizeOnset, themeById, THEMES, type CueNote, type Theme } from './melody';
 
 /** The four things a player can turn down or off, plus master mute. */
 export type Channel = 'music' | 'ambience' | 'notes' | 'sfx';
@@ -52,6 +52,7 @@ export class AudioBus {
   private readonly loops = new Map<'ambience' | 'music', AudioBufferSourceNode>();
   private readonly cue = new Set<AudioScheduledSourceNode>();
   private wantLoops = false;
+  private loading: Promise<void> | null = null;
   private musicStart = 0;
   private muted = false;
   private volume: Record<Channel, number> = { ...DEFAULT_VOLUME };
@@ -73,7 +74,9 @@ export class AudioBus {
     } catch {
       /* storage unavailable or corrupt: keep defaults */
     }
-    this.theme = themeById(themeId ?? storedTheme ?? DEFAULT_THEME);
+    // A valid ?theme= wins, then the stored choice, then the default.
+    const valid = (id: string | null | undefined): string | null => (id && THEMES.some((t) => t.id === id) ? id : null);
+    this.theme = themeById(valid(themeId) ?? valid(storedTheme) ?? DEFAULT_THEME);
   }
 
   get isMuted(): boolean {
@@ -168,9 +171,20 @@ export class AudioBus {
       this.reverb.gain.value = 0.5;
       const notes = this.buses.get('notes');
       if (notes) this.reverb.connect(convolver).connect(notes);
-      void this.loadAll();
+      this.loading = this.loadAll();
     }
     if (this.ctx.state === 'suspended') await this.ctx.resume().catch(() => undefined);
+  }
+
+  /**
+   * Unlock, start the beds, and wait (briefly) for the samples, so the first sting is played by
+   * the real voice and lands on the music's grid.
+   */
+  async ready(maxWait = 2500): Promise<void> {
+    await this.unlock();
+    this.startLoops();
+    await Promise.race([this.loading ?? Promise.resolve(), new Promise<void>((resolve) => setTimeout(resolve, maxWait))]);
+    this.startLoops();
   }
 
   setMuted(muted: boolean): void {
@@ -271,7 +285,9 @@ export class AudioBus {
     const { ctx } = this;
     if (!ctx) return;
     this.stopCue();
-    const start = ctx.currentTime + 0.06;
+    // On the music's eighth-note grid when the loop is playing, so it is auditioned in time.
+    const now = ctx.currentTime + 0.06;
+    const start = this.musicStart > 0 ? this.musicStart + Math.ceil((now - this.musicStart) / EIGHTH) * EIGHTH : now;
     for (let i = 0; i < count; i++) {
       const note = melodyNote(theme, offset + i + 1, false);
       this.voice(note.degree, 0.9, start + i * EIGHTH, true);

@@ -30,6 +30,7 @@ const DEFAULT_GRID: readonly [number, number] = [216, 387];
 /** The win sequence: a slow-motion beat, then the celebration, then the results card. */
 const WIN_SECONDS = 6;
 const UNLOCK_STORE = 'neonriver2_hard_river';
+const PAPER_LANTERN = ['.###.', '#####', '#.#.#', '#####', '#.#.#', '#####', '.###.', '..#..'];
 const GEAR = ['...#.#...', '.#.###.#.', '..#####..', '###...###', '.##...##.', '###...###', '..#####..', '.#.###.#.', '...#.#...'];
 const SPEAKER = ['...#.....', '..##..#..', '####...#.', '####.#.#.', '####...#.', '..##..#..', '...#.....'];
 const SPEAKER_OFF = ['...#.....', '..##.#.#.', '####..#..', '####.#.#.', '####.....', '..##.....', '...#.....'];
@@ -48,7 +49,7 @@ const C = {
   droplet: color('#9ccbcf'),
   firefly: color('#ffd98a'),
   paper: color('#ffc66a'),
-  smoke: color('#0c0c12'),
+  smoke: color('#5f696b'),
   fireA: color('#ff5fd0'),
   fireB: color('#39e6ee'),
   fireC: color('#ffd98a'),
@@ -132,6 +133,7 @@ export class Game {
   private lanternTimer = 0;
   private fireworkTimer = 0;
   private readonly leaps: { age: number; from: number; to: number; s: number }[] = [];
+  private readonly lanterns: { x: number; y: number; vx: number; vy: number; age: number; phase: number }[] = [];
   private settingsOpen = false;
   private reduceFlashing = false;
   private banner = 0;
@@ -222,12 +224,16 @@ export class Game {
   private space(): void {
     if (this.win > 0 && this.mode === 'playing') this.skipWin();
     else if (this.mode === 'playing' || this.mode === 'paused') this.togglePause();
+    else if (this.settingsOpen) this.settingsOpen = false;
     else this.confirm();
   }
 
-  private skipWin(): void {
-    if (this.win > 0.4 && this.mode === 'playing') {
-      this.win = WIN_SECONDS;
+  /**
+   * Skip the win sequence to the results card. A key works almost at once; a touch only after
+   * 1.5 s, so re-gripping the phone after the last catch does not throw the celebration away.
+   */
+  private skipWin(touch = false): void {
+    if (this.win > (touch ? 1.5 : 0.4) && this.mode === 'playing') {
       this.audio.stopCue();
       this.setMode('over');
     }
@@ -249,18 +255,18 @@ export class Game {
       onPause: () => this.togglePause(),
       onConfirm: () => this.confirm(),
       onSpace: () => this.space(),
-      onTap: () => this.skipWin(),
+      onTap: () => this.skipWin(true),
       onFirstGesture: () => {
         void this.audio.unlock().then(() => this.audio.startLoops());
       },
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.mode === 'playing') this.setMode('paused');
+      if (document.hidden && this.mode === 'playing' && this.win === 0) this.setMode('paused');
       // A hidden tab is silent in every mode; a paused game keeps its beds so the mix can be set by ear.
       this.audio.setPaused(document.hidden);
     });
     window.addEventListener('blur', () => {
-      if (this.mode === 'playing') this.setMode('paused');
+      if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
     });
     this.overlay.setTexel(this.view.layout.scale / (window.devicePixelRatio || 1));
     this.setMode('title');
@@ -291,8 +297,12 @@ export class Game {
     else if (this.mode === 'title' || this.mode === 'over') {
       this.settingsOpen = false;
       this.startRun();
-      // The leitmotif, stated once, as the night begins.
-      void this.audio.unlock().then(() => this.audio.startSting());
+      // The leitmotif, stated once, as the night begins: wait for the sampled voice and the music
+      // so the first thing the player hears is the real instrument, in time.
+      const run = this.runCount;
+      void this.audio.ready().then(() => {
+        if (this.runCount === run && this.mode === 'playing') this.audio.startSting();
+      });
     } else if (this.mode === 'paused') this.setMode('playing');
   }
 
@@ -313,6 +323,7 @@ export class Game {
     this.fry = 0;
     this.lossCue = 0;
     this.leaps.length = 0;
+    this.lanterns.length = 0;
     this.audio.stopCue();
     this.scoop = 0;
     this.bulge = 0;
@@ -411,7 +422,6 @@ export class Game {
         break;
       case 'spawn':
         this.audio.spawn();
-        this.telegraph = null;
         break;
       case 'catch': {
         const p = this.fishPoint(event.fish);
@@ -518,7 +528,11 @@ export class Game {
     const { particles, ripples } = this.view;
     const state = this.sim.state;
     this.banner = Math.max(0, this.banner - dt);
-    if (this.telegraph) this.telegraph.age += dt;
+    if (this.telegraph) {
+      // The warning glow lasts its lead time and then lets go (the eel has spawned by then).
+      this.telegraph.age += dt;
+      if (this.telegraph.age > this.config.telegraphLead + 0.15) this.telegraph = null;
+    }
     for (const pop of this.pops) pop.age += dt;
     while (this.pops[0] && this.pops[0].age > 0.7) this.pops.shift();
 
@@ -674,10 +688,13 @@ export class Game {
 
   /** The win: slow-motion beat, golden basket, the net raised, koi leaping, lanterns, fireworks. */
   private updateWin(dt: number): void {
-    if (this.win <= 0 || this.mode !== 'playing') return;
+    const card = this.mode === 'over' && this.lossCause === null;
+    if (this.win <= 0 || (this.mode !== 'playing' && !card)) return;
     // The sequence runs on real time; only the world's motion is slowed during the first beat.
     const real = this.win < 0.7 && !this.reducedMotion ? dt / 0.3 : dt;
     this.win += real;
+    // Behind the results card the lanterns and fireworks carry on; the leaping koi finish and stop.
+    if (card) this.win = Math.max(this.win, 2);
     const { particles, ripples } = this.view;
     const { gridW, gridH } = this.view.assets;
     for (const leap of this.leaps) leap.age += dt;
@@ -688,7 +705,7 @@ export class Game {
         ripples.inject(p.x, p.y, 4, 0.7);
       }
     }
-    if (this.win > 1.1 && !this.reducedMotion) {
+    if (this.win > 1.1 && !this.reducedMotion && !card) {
       // Koi leap in arcs across the river.
       this.leapTimer -= dt;
       if (this.leapTimer <= 0) {
@@ -718,42 +735,50 @@ export class Game {
       if (this.lanternTimer <= 0) {
         this.lanternTimer = 0.22;
         const p = this.gridPoint(0.45 + this.fx.next() * 0.55, 0.08 + this.fx.next() * 0.84);
-        particles.emit({
+        this.lanterns.push({
           x: p.x,
           y: p.y,
-          vx: (this.fx.next() - 0.5) * 2,
-          vy: -5 - this.fx.next() * 4,
-          life: 4.5,
-          color: C.paper,
-          size: 2.4 + this.fx.next() * 1.2,
-          glow: 1.7,
+          vx: (this.fx.next() - 0.5) * 3,
+          vy: -7 - this.fx.next() * 5,
+          age: 0,
+          phase: this.fx.next() * 6,
         });
+        if (this.lanterns.length > 14) this.lanterns.shift();
       }
       // Pixel fireworks over the skyline; fewer and softer when flashing is reduced.
       this.fireworkTimer -= dt;
       if (this.fireworkTimer <= 0) {
         this.fireworkTimer = this.reduceFlashing ? 1.1 : 0.45;
         const cx = (0.18 + this.fx.next() * 0.7) * gridW;
-        const cy = (0.02 + this.fx.next() * 0.07) * gridH;
+        const cy = (0.03 + this.fx.next() * 0.1) * gridH;
         const tint = [C.fireA, C.fireB, C.fireC][Math.floor(this.fx.next() * 3)] ?? C.fireA;
-        for (let i = 0; i < 18; i++) {
-          const a = (i / 18) * Math.PI * 2;
-          const v = 9 + this.fx.next() * 7;
+        const flashy = !this.reduceFlashing;
+        for (let i = 0; i < 28; i++) {
+          const a = (i / 14) * Math.PI * 2;
+          const v = (i < 14 ? 16 : 9) + this.fx.next() * 4;
           particles.emit({
             x: cx,
             y: cy,
             vx: Math.cos(a) * v,
             vy: Math.sin(a) * v,
-            gravity: 9,
-            life: 0.9,
-            color: tint,
-            size: 1.1,
-            glow: this.reduceFlashing ? 1.1 : 2.4,
+            gravity: 8,
+            life: 1.1 + this.fx.next() * 0.3,
+            color: i < 14 ? tint : C.white,
+            size: flashy ? 1.7 : 1.2,
+            glow: flashy ? 3 : 1.1,
           });
         }
       }
     }
-    if (this.win >= WIN_SECONDS) this.setMode('over');
+    for (const lantern of this.lanterns) {
+      lantern.age += dt;
+      lantern.x += (lantern.vx + Math.sin(this.time * 1.3 + lantern.phase) * 2) * dt;
+      lantern.y += lantern.vy * dt;
+      // Each paper lantern carries its own warm glow.
+      if (this.fx.next() < dt * 9)
+        particles.emit({ x: lantern.x + 2.5, y: lantern.y + 4, life: 0.35, color: C.paper, size: 5.5, glow: 1.5 });
+    }
+    if (this.win >= WIN_SECONDS && this.mode === 'playing') this.setMode('over');
   }
 
   private scoopLift(): number {
@@ -903,7 +928,18 @@ export class Game {
     // Eel shock: a white-blue flash, then the river goes dark and the neon dies.
     const shock = this.shock;
     const darken = shock > 0 ? Math.min(0.55, Math.max(0, shock - 0.12) * 1.6) : 0;
-    const neonOut = shock > 0 ? (shock > 0.6 ? 0.12 : Math.floor(shock * 14) % 2 === 0 ? 1 : 0.2) : 1;
+    // With flashing reduced the neon fades out once instead of strobing.
+    const neonOut =
+      shock > 0
+        ? this.reduceFlashing
+          ? Math.max(0.12, 1 - shock * 1.6)
+          : shock > 0.6
+            ? 0.12
+            : Math.floor(shock * 14) % 2 === 0
+              ? 1
+              : 0.2
+        : 1;
+    const cheer = this.win > 0.7 && !this.reducedMotion;
     const flash = shock > 0 && !this.reducedMotion ? Math.max(0, 1 - shock * 5) : 0;
     const flicker = 0.9 + 0.1 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3);
     const dim = this.mode === 'title' ? 0.3 : this.mode === 'paused' ? 0.45 : this.mode === 'over' ? 0.5 : 0;
@@ -930,14 +966,32 @@ export class Game {
       waterLights,
       eelLights,
       lantern: flicker,
-      breath: Math.sin(this.time * 1.4) > 0.3 ? 1 : 0,
-      lean: this.mode === 'title' ? 0 : state.net.lane < 0.33 ? -1 : state.net.lane > 0.72 ? 1 : 0,
-      jolt: shock > 0 && shock < 0.5 ? (Math.floor(shock * 30) % 2 === 0 ? 1 : -1) : 0,
+      // On a win he bobs with the fanfare; otherwise he just breathes.
+      breath: cheer ? (Math.floor(this.time * 5.33) % 2 === 0 ? 1 : 0) : Math.sin(this.time * 1.4) > 0.3 ? 1 : 0,
+      lean:
+        this.mode === 'title'
+          ? 0
+          : cheer
+            ? Math.floor(this.time * 2.67) % 2 === 0
+              ? 1
+              : -1
+            : state.net.lane < 0.33
+              ? -1
+              : state.net.lane > 0.72
+                ? 1
+                : 0,
+      jolt: shock > 0 && shock < (this.reduceFlashing ? 0.12 : 0.5) ? (Math.floor(shock * 30) % 2 === 0 ? 1 : -1) : 0,
       darken: Math.max(darken, dim),
       // The city surges on a win.
       neon: this.win > 0 ? 1 + 0.55 * THREE.MathUtils.smoothstep(this.win, 1, 2.2) * (0.85 + 0.15 * Math.sin(this.time * 6)) : neonOut,
       flash,
       glitch: shock > 0 && shock < 0.06 && !this.reducedMotion ? 0.004 : 0,
+      // A swell of gold as the celebration starts, settling to a faint warmth.
+      warm:
+        this.win > 0.5
+          ? (this.reduceFlashing ? 0.25 : 0.25 + 0.75 * Math.max(0, 1 - (this.win - 0.7) / 1.4) ** 2) *
+            THREE.MathUtils.smoothstep(this.win, 0.5, 0.8)
+          : 0,
       drift: this.reducedMotion ? 0 : (netLane - 0.5) * 3 + Math.sin(this.time * 0.13) * 1.2,
     };
   }
@@ -969,7 +1023,7 @@ export class Game {
     v.label('hud-escaped-label', show ? 'ESCAPED' : '', x + 53, y + 3, '#a1987a');
     const danger = s.escaped >= this.config.maxEscaped - 6;
     v.label('hud-escaped', show ? `${s.escaped}/${this.config.maxEscaped}` : '', x + 53, y + 12, danger ? '#ff9933' : '#9ccbcf');
-    v.label('hud-streak', show && s.streak >= 3 ? `x${s.streak}` : '', x + w + 4, y + 8, '#ffd98a');
+    v.label('hud-streak', show && this.mode !== 'over' && s.streak >= 3 ? `x${s.streak}` : '', x + w + 4, y + 8, '#ffd98a');
 
     // Phase banner: a hanging wooden sign over the sky, clear of the river's path.
     const banner = this.banner > 0 && (this.mode === 'playing' || this.mode === 'paused');
@@ -980,6 +1034,11 @@ export class Game {
     v.panel('banner-body', bx, by, bw, 13, banner ? '#834433' : null);
     v.label('banner-text', banner ? this.bannerText : '', originX + gridW / 2, by + 3, '#ffd98a', 'center');
 
+    for (let i = 0; i < 14; i++) {
+      const lantern = this.lanterns[i];
+      const on = lantern && lantern.age < 6 && this.win > 0;
+      v.icon(`win-lantern-${i}`, on ? PAPER_LANTERN : null, originX + (lantern?.x ?? 0), originY + (lantern?.y ?? 0), '#ffd98a', 5);
+    }
     for (let i = 0; i < 6; i++) {
       const pop = this.pops[i];
       if (!pop) {
@@ -1191,6 +1250,7 @@ export class Game {
           for (let i = 0; i < 600 && this.win < 3.4; i++) this.frame(STEP);
           if (name === 'win-results') {
             this.skipWin();
+            for (let i = 0; i < 30; i++) this.frame(STEP);
             if (this.mode !== 'over' || this.lossCause !== null) throw new Error('win-results not reached');
           }
         } else if (name === 'eel-basket') {

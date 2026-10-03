@@ -163,3 +163,53 @@ could not be heard (pausing suspended the audio) or used with arrow keys (the
 game's own key handler ate them). The resolution A/B flipped too: rendering the
 3D layer at 3 px per painted pixel looked bad with a nearest upscale, and fine
 with a sharp-bilinear one — so the cheaper option is now the default.
+
+## 2026-10-03 — Gate 1.5, round 2: pace, a hook, and a win worth chasing
+
+Kyle played it: right look, too slow for too long, and the catch tune was "thin".
+
+### Pace: the arithmetic that sets everything
+
+- Before: first fish reached the net at 6.7 s (2 s rest + first spawn + 4.2 s
+  swim). After: 1.65 s, because the river starts with fish already in it.
+- Rests went from 2 s to 0.75 s, travel from 4.2 s to a ramp of 3.0 → 1.9 s.
+- The surprise: measured in pounds, the old build was already _on_ Kyle's pace
+  targets (53 lb at 0:40, 104 at 1:15). It felt slow because of dead time and
+  slow fish, not because weight arrived slowly.
+- Kyle asked for a spawn period of 0.28 s by the end. It can't be done with the
+  other rules: only 20 lb may escape, so a winner has caught nearly everything
+  that spawned, so the target "200 lb at 2:15" fixes how much may spawn — about
+  1.55 lb/s. More catchable fish just ends the night sooner. A test run at
+  0.28 s dropped the human-like bot's win rate from 61% to 3.5%. The honest
+  levers are speed, sweep, and eels (they weigh nothing). The table stops at
+  0.42 s and 46–66% eels late; there is a `?tune` panel to feel the alternative.
+
+### Bots found my bugs, and I found theirs
+
+- The oracle bot now wins 100 of 100 seeds without touching an eel.
+- My first "human-like" bot lost every single run to eels. The cause was mine:
+  when boxed in it "fled" to the nearer edge of the eel's lane, which was
+  sometimes _across_ the eel. A second bug: it aimed for the very edge of the
+  catch radius to save travel, so 3% aim noise turned catches into misses.
+- An attempt to make the planner smarter (fall back to tighter margins, follow
+  its own best path) made it oscillate between two plans and die more. Reverted.
+
+### The melody
+
+- Three original motifs to choose from, each stated by a start sting, quoted by
+  the phase stinger, turned into a fanfare for the win and sunk to the low
+  tonic for a loss. Since I can't hear, there is an `?audition` page.
+- Reviewer catch: the very first sting played before the koto sample had
+  decoded, so the first thing a player heard was the fallback synth.
+
+### The win
+
+- First version was thin next to the eel shock (the reviewer's words). The
+  "paper lanterns" were yellow dots, and koi leaping in celebration froze in
+  mid-air when the results card appeared. Now: a gold wash, pixel-art lanterns,
+  bigger fireworks, a cheering fisherman, and effects that carry on behind the
+  card.
+
+Media: `docs/media/gate-1.5/` — `full-run-desktop.webm`, `full-run-mobile.webm`
+(a whole bot-played night to the win), `eel-basket-*.webm`, `win-*`,
+`win-results-*`, `eel-basket-*`, `eel-storm-*`, `title-settings-*`.

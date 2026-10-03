@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import { RIVER } from '../../src/data/river';
+import { HumanBot } from '../../src/sim/bots/human';
+import { oracleIntent } from '../../src/sim/bots/oracle';
 import { trackerIntent } from '../../src/sim/bots/tracker';
 import { DEFAULT_CONFIG, type SimConfig } from '../../src/sim/config';
 import { createNet, stepNet, type NetIntent } from '../../src/sim/net';
@@ -146,7 +148,7 @@ describe('phases and emitter', () => {
     for (const e of sim.drainEvents()) marks.push({ type: e.type, t: 0 });
     let firstArrival = Infinity;
     for (let i = 0; i < 40 / DT && sim.state.status === 'playing'; i++) {
-      sim.step(DT, tracker(sim));
+      sim.step(DT, oracleIntent(sim.state, sim.config));
       for (const e of sim.drainEvents()) {
         if (e.type === 'phaseStart' || e.type === 'restStart') marks.push({ type: e.type, t: sim.state.time });
         if ((e.type === 'catch' || e.type === 'miss') && firstArrival === Infinity) firstArrival = sim.state.time;
@@ -250,26 +252,6 @@ describe('phases and emitter', () => {
 });
 
 describe('eel warnings and spacing at the net', () => {
-  it('warns of every eel a full lead (or a full spawn period) ahead, even as the first spawn of a phase', () => {
-    for (const seed of SEEDS.slice(0, 60)) {
-      const sim = new Sim({ seed, river });
-      let warnedAt: number | null = null;
-      for (let i = 0; i < 34 / DT && sim.state.status === 'playing'; i++) {
-        sim.step(DT, tracker(sim));
-        for (const e of sim.drainEvents()) {
-          if (e.type === 'telegraph') warnedAt = sim.state.time;
-          if (e.type === 'spawn' && e.fish.kind === 'eel') {
-            expect(warnedAt).not.toBeNull();
-            // The warning comes as early as the spawn rhythm allows: the full lead, or one spawn period.
-            const lead = Math.min(DEFAULT_CONFIG.telegraphLead, sim.pace().period);
-            expect(sim.state.time - (warnedAt ?? 0)).toBeGreaterThanOrEqual(lead - 2 * DT - 1e-6);
-            warnedAt = null;
-          }
-        }
-      }
-    }
-  });
-
   it('never has an eel and a fish cross the rail close together in both time and lane', () => {
     // Measured where it matters: actual rail-crossing times and lanes, not spawn-time estimates.
     const { eelWindow, eelGap } = DEFAULT_CONFIG.fairness;
@@ -435,5 +417,96 @@ describe('determinism', () => {
     let caught = 0;
     for (const seed of SEEDS.slice(0, 50)) caught += run(seed, 14, tracker).sim.state.caught;
     expect(caught / 50).toBeGreaterThan(12);
+  });
+});
+
+describe('the whole night, at late-game pace', () => {
+  const oracle = (sim: Sim): NetIntent => oracleIntent(sim.state, sim.config);
+  const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? NaN;
+
+  it('is winnable on every seed by a planner with the real net, without touching an eel', () => {
+    for (const seed of SEEDS.slice(0, 30)) {
+      const { sim } = run(seed, 300, oracle);
+      expect(sim.state.status, `seed ${seed}`).toBe('won');
+      expect(sim.state.escaped).toBeLessThan(DEFAULT_CONFIG.maxEscaped);
+    }
+  });
+
+  it('keeps the eel warning and the fairness guards through the loop phases, where the pace is fastest', () => {
+    const { maxJump, reachShare } = DEFAULT_CONFIG.fairness;
+    let lateEels = 0;
+    for (const seed of SEEDS.slice(0, 24)) {
+      const sim = new Sim({ seed, river });
+      const warned: number[] = [];
+      let lastLane: number | null = null;
+      while (sim.state.status === 'playing' && sim.state.time < 170) {
+        const pace = sim.pace();
+        sim.step(DT, oracle(sim));
+        for (const e of sim.drainEvents()) {
+          if (e.type === 'telegraph') warned.push(sim.state.time);
+          if (e.type !== 'spawn') continue;
+          expect(e.fish.lane).toBeGreaterThanOrEqual(0);
+          expect(e.fish.lane).toBeLessThanOrEqual(1);
+          if (e.fish.kind === 'eel') {
+            if (sim.state.time > 100) lateEels++;
+            // Its warning came a full lead earlier, even when fish spawn faster than the lead.
+            const at = warned.shift();
+            expect(at, `seed ${seed} t=${sim.state.time.toFixed(2)}`).toBeDefined();
+            expect(sim.state.time - (at ?? 0)).toBeGreaterThanOrEqual(DEFAULT_CONFIG.telegraphLead - 2 * DT - 1e-6);
+          } else if (lastLane !== null) {
+            // A non-eel never jumps further than the capped net can follow in one spawn period.
+            const allowed = Math.min(maxJump, DEFAULT_CONFIG.net.cap * pace.period * reachShare);
+            expect(Math.abs(e.fish.lane - lastLane)).toBeLessThanOrEqual(allowed + 0.02);
+          }
+          lastLane = e.fish.lane;
+        }
+      }
+    }
+    expect(lateEels).toBeGreaterThan(200);
+  });
+
+  it('holds the pace targets for a human-like player: about 50 lb by 0:40 and 100 lb by 1:15', () => {
+    const at40: number[] = [];
+    const at75: number[] = [];
+    const wins: number[] = [];
+    for (const seed of SEEDS.slice(0, 40)) {
+      const sim = new Sim({ seed, river });
+      const bot = new HumanBot(seed);
+      let a: number | null = null;
+      let b: number | null = null;
+      while (sim.state.status === 'playing' && sim.state.time < 300) {
+        sim.step(DT, bot.intent(sim.state, sim.config));
+        sim.drainEvents();
+        if (a === null && sim.state.time >= 40) a = sim.state.caught;
+        if (b === null && sim.state.time >= 75) b = sim.state.caught;
+      }
+      at40.push(a ?? sim.state.caught);
+      at75.push(b ?? sim.state.caught);
+      if (sim.state.status === 'won') wins.push(sim.state.time);
+    }
+    expect(median(at40)).toBeGreaterThanOrEqual(44);
+    expect(median(at40)).toBeLessThanOrEqual(62);
+    expect(median(at75)).toBeGreaterThanOrEqual(90);
+    expect(median(at75)).toBeLessThanOrEqual(120);
+    // Wins land around 2:15, and the night is neither a formality nor a wall.
+    expect(median(wins)).toBeGreaterThan(115);
+    expect(median(wins)).toBeLessThan(155);
+    expect(wins.length / 40).toBeGreaterThan(0.25);
+    expect(wins.length / 40).toBeLessThan(0.8);
+  });
+
+  it('applies the tune multipliers to the running pace', () => {
+    const sim = new Sim({ seed: 1, river });
+    const base = sim.pace();
+    sim.config = { ...sim.config, tune: { speed: 2, density: 2, sweep: 0.5, eel: 0 } };
+    const tuned = sim.pace();
+    expect(tuned.travel).toBeCloseTo(base.travel / 2, 6);
+    expect(tuned.period).toBeCloseTo(base.period / 2, 6);
+    expect(tuned.sweep).toBeCloseTo(base.sweep / 2, 6);
+    expect(tuned.eelChance).toBe(0);
+    for (let i = 0; i < 20 / DT && sim.state.status === 'playing'; i++) {
+      sim.step(DT, oracle(sim));
+      for (const e of sim.drainEvents()) if (e.type === 'spawn') expect(e.fish.kind).not.toBe('eel');
+    }
   });
 });

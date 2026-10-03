@@ -94,7 +94,8 @@ export class Overlay {
     const t = this.texel;
     const padX = name.startsWith('vol-') ? 0 : Math.max(0, Math.ceil((MIN_TOUCH - rect.w * t) / 2 / t));
     const padY = Math.max(0, Math.ceil((MIN_TOUCH - rect.h * t) / 2 / t));
-    const x = Math.max(0, rect.x - padX) * t;
+    // A toggle grows to the left only, so it never overlaps the slider beside it.
+    const x = Math.max(0, rect.x - (name.startsWith('tog-') ? padX * 2 : padX)) * t;
     const y = Math.max(0, rect.y - padY) * t;
     const w = (rect.w + padX * 2) * t;
     const h = (rect.h + padY * 2) * t;

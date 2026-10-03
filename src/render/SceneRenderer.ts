@@ -52,6 +52,8 @@ export interface FrameView {
   readonly neon: number;
   readonly flash: number;
   readonly glitch: number;
+  /** 0..1 gold wash (win). */
+  readonly warm: number;
   /** Far-layer parallax in texels. */
   readonly drift: number;
 }
@@ -324,6 +326,7 @@ export class SceneRenderer {
           uGrade: { value: 0.18 },
           uVignette: { value: 0.35 },
           uGlitch: { value: 0 },
+          uWarm: { value: 0 },
           uSource: { value: new THREE.Vector2(1, 1) },
         },
       }),
@@ -430,7 +433,7 @@ export class SceneRenderer {
   }
 
   /** A small pixel icon from rows of '#' and '.', placed in target texels. */
-  icon(id: string, rows: readonly string[] | null, x: number, y: number, hex = '#ffffff'): void {
+  icon(id: string, rows: readonly string[] | null, x: number, y: number, hex = '#ffffff', order = 21): void {
     let item = this.ui.get(id);
     if (!rows) {
       if (item) item.mesh.visible = false;
@@ -441,7 +444,7 @@ export class SceneRenderer {
       const material = this.quadMaterial(this.white, false);
       const mesh = new THREE.Mesh(this.quad01, material);
       mesh.frustumCulled = false;
-      mesh.renderOrder = 21;
+      mesh.renderOrder = order;
       this.uiScene.add(mesh);
       item = { mesh, material, text: '' };
       this.ui.set(id, item);
@@ -500,6 +503,7 @@ export class SceneRenderer {
     s.uDrift!.value = view.drift;
     s.uFlash!.value = view.flash;
     this.final.uniforms.uGlitch!.value = view.glitch;
+    this.final.uniforms.uWarm!.value = view.warm;
 
     for (let i = 0; i < WATER_LIGHTS; i++) {
       const l = view.waterLights[i];

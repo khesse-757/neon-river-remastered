@@ -406,6 +406,7 @@ uniform sampler3D uLut;
 uniform float uGrade;
 uniform float uVignette;
 uniform float uGlitch;
+uniform float uWarm;
 uniform vec2 uSource;
 varying vec2 vUv;
 // Sharp-bilinear: nearest inside each source pixel, a one-screen-pixel blend at its edges.
@@ -426,6 +427,8 @@ void main() {
     col.r = texture2D(tDiffuse, uv + vec2(uGlitch, 0.0)).r;
     col.b = texture2D(tDiffuse, uv - vec2(uGlitch, 0.0)).b;
   }
+  // Win: a wash of lantern gold over the whole night.
+  col += vec3(1.0, 0.72, 0.3) * uWarm * (0.1 + 0.5 * dot(col, vec3(0.33)));
   vec2 d = vUv - 0.5;
   col *= 1.0 - uVignette * smoothstep(0.25, 0.85, dot(d, d) * 2.2);
   // Soft shoulder so bloomed highlights roll off instead of clipping.

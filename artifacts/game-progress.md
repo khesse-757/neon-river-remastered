@@ -15,10 +15,54 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 ## Gate status
 - [x] Gate 0 — Design + tech plan approved (2026-10-02)
 - [x] Gate 1 — Look-dev slice: merged as the foundation (PR #1, 2026-10-03). Look NOT approved: too flat and low-res.
-- [ ] Gate 1.5 — Art direction v2 + audio fixes: built, awaiting Kyle's review (branch `gate-1.5/art-v2`)
+- [ ] Gate 1.5 — Art direction v2 + audio: look direction approved by Kyle (capped actors approved); round 2 (pace, leitmotif, win) built, awaiting review (branch `gate-1.5/art-v2`, PR #2)
 - [ ] Gate 2 — Full loop playable
 - [ ] Gate 3 — Polish + QA pass
 - [ ] Gate 4 — Release candidate
+
+## Gate 1.5, round 2 (Kyle's review of 2026-10-03) — pace, leitmotif, win
+
+Kyle: v2 look is the right direction; capped actor resolution approved. Not approved yet. This round, on the same branch / PR #2:
+
+### Pace (measured by the playtester agent and `npm run playtest`)
+| | BEFORE (3db463a) | AFTER (final table, 100 oracle / 200 human seeds) | Target |
+| --- | --- | --- | --- |
+| First fish at the net | 6.73 s | 1.65 s | ~2 s |
+| Human-like lb at 0:40 / 1:15 | 53 / 104 | 53 / 101 (winners 55 / 105) | ~50 / ~100 |
+| Human-like median win | 123.5 s | 139.6 s (2:20) | ~2:15 |
+| Human-like win rate | 43.3% | 49% | 35–60% |
+| Oracle | 95%, 1 eel loss | 100%, 0 eel contacts, median 134.3 s | 100%, 0 eels |
+
+Pace curve, median lb caught (AFTER): 
+| t (s) | 15 | 30 | 40 | 60 | 75 | 90 | 105 | 120 | 135 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Oracle | 18 | 40 | 55 | 84 | 105 | 128 | 150 | 173 | 200 |
+| Human-like, all runs | 17 | 39 | 53 | 82 | 101 | 121 | 140 | 162 | 181 |
+| Human-like, winners | 18 | 41 | 55 | 84 | 105 | 125 | 147 | 169 | 193 |
+
+- The playtester's AFTER run was on 7392ee4 (human win rate 61%, just over the band). I then raised eel share in Lantern Koi, Twin Banks, Braided Stream and Moonrise and tightened the last two phases' period; the numbers above are my own run of the same script on the final table, not the agent's.
+- **Tuning changes this round** (all in `src/sim/config.ts`): rest 2 → 0.75 s; prefilled river (3 fish at progress 0.42 / 0.24 / 0.06); ramp over 135 s or 200 lb: travel 3.0→1.9 s, period 0.62→0.42 s, sweep 0.8→3.0; nine phases as multipliers (table in brief §3.3); non-eel jump ≤ 40% of net reach per period; eel/fish spacing 0.25 → 0.4 lanes; eel hitbox 0.0425 → 0.032; eels rolled two spawns ahead so the 0.6 s warning holds when fish spawn faster than that.
+- **Kyle's starting target of period 0.28 s is not met, deliberately.** The playtester checked the argument: spawned non-eel weight is pinned near 1.55 lb/s by the 2:15 target and the 20-lb escape limit (winners see 216 lb spawned: 200 caught, 13 escaped). A counterfactual with period → 0.28 s at the same mix: human win rate 3.5%, wins 25 s too fast. Reaching 0.28 s would need roughly 80% eels late. Kyle can try it live with `?tune` (density ×1.5).
+- **Difficulty shape (playtester):** rises in steps, flat at 0–45 s and 60–120 s, with most losses after 120 s in the loop phases. Partly addressed by the eel-share changes above; a smoother climb is Gate 2 tuning.
+- Bots: `src/sim/bots/` oracle (DP over arrivals with the real net cap; eels block their lane for ±0.22 s) and human-like (220 ms old picture, aim noise, 4-fish lookahead, aims at fish centres). An attempt to make the planner fall back to tighter eel margins and backtrack its path made it oscillate and die; reverted to the simpler version with only the flee-direction fix.
+
+### Audio
+- Three original leitmotif candidates in D hirajoshi (`src/audio/melody.ts`): Lantern (default), Heron, Ripple. Each has a 3–5 note motif, a 32-step catch sequence + 32-step variation, start sting, phase stinger, win fanfare, loss phrase. `?audition` plays them; `?theme=` selects.
+- Voice: koto sample low-passed, sine "mallet" body with a short overtone, soft octave below, convolution reverb send.
+- Channels: Music, Ambience, Fish Notes, Splashes, each with toggle + slider, plus master mute. First sting waits for the samples to decode (was playing the fallback string).
+
+### Look / feel
+- Fish: stepped moon specular, scale sparkle, stronger koi gleam; surface brightness clamped at 0.58 linear so only self-light exceeds it. Eel emissive × 0.87.
+- Basket: contact shadow, water, wet sheen, top fish flops. An eel now fries the catch (arc from net to basket, sparks, smoke, charring) before the loss screen (2.1 s).
+- Win (6 s, skippable by key after 0.4 s or touch after 1.5 s): slow-motion beat, gold wash, golden basket, raised net and cheering fisherman, leaping koi, pixel paper lanterns, fireworks, neon surge, fanfare, results card. Reduced motion removes slow-motion and leaps; reduced flashing softens fireworks, wash and the eel strobe.
+- Controls: Space pauses/resumes only; gear + mute top-left on title and in play; settings panel on the title.
+
+### Performance (production preview, Apple GPU, not a phone)
+- 59.3 fps desktop, 59.2 fps mobile-capped; ≤ 66 draw calls in play, 100 on the pause panel (at the mobile budget: each UI panel is a draw call — atlas the UI in Gate 2); ≤ 6k triangles.
+
+### Fresh-eyes review, round 3 (HEAD 7392ee4): "needs fixes" — 0 blockers, 5 majors
+Fixed afterwards: `?tune` is now a compact strip docked under the painting (was covering the phone screen); first sting waits for the koto sample and the music; leaping koi no longer freeze on the results card and lanterns/fireworks continue behind it; win made bigger (gold wash, pixel lanterns, larger fireworks, cheering fisherman, softer basket glow); sim tests now cover the whole night (oracle winnability on 30 seeds, telegraph lead and jump guard through the loop phases, pace targets, tune multipliers). Minors fixed: full 0.6 s eel warning at dense spawn rates, reduce-flashing covers the eel shock, visible smoke, fish clamp, audition on the beat, audition owns the keyboard, `?theme=` fallback, toggle/slider overlap, blur during the win, touch-skip delay, Space closes the title panel, streak badge off the results card.
+Left: eel-window guard is never exercised with one emitter (matters for Braided Stream's second emitter in Gate 2); focus ring crosses text at 1 CSS px per texel; texture and draw-call counts on UI-heavy screens.
 
 ## Gate 1.5 (art direction v2) — decisions
 - **Supersedes** the Gate 1 decisions about one 216×387 grid for everything, flat sprites, palette-lock composite, voxel A/B and ripple thresholds. The sim, input, in-canvas pixel UI, hooks and tooling carry over unchanged.

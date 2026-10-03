@@ -15,9 +15,9 @@ export function installAudition(game: Game): void {
   );
   const audio = game.audio;
   const ready = async (): Promise<void> => {
-    await audio.unlock();
-    if (withMusic.checked) audio.startLoops();
-    else audio.stopLoops();
+    // Wait for the sampled voice, so even the first press is the real instrument.
+    await audio.ready();
+    if (!withMusic.checked) audio.stopLoops();
   };
 
   const heading = document.createElement('h1');

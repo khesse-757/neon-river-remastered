@@ -121,21 +121,35 @@ export function installDevTools(game: Game, openTune = false): void {
   const gui = new GUI({ title: 'Neon River dev' });
   gui.close();
 
-  // ?tune: live pace multipliers, sized for a thumb, with a copy button to paste the values back.
+  // ?tune: live pace multipliers. On its own it is a compact strip docked under the painting, so
+  // the river stays visible and the start button stays reachable on a phone.
   const tune = { ...game.config.tune, values: '' };
-  const tuneFolder = gui.addFolder('tune (pace)');
+  const tuneGui = openTune ? new GUI({ title: 'tune pace', autoPlace: false, width: 320 }) : gui.addFolder('tune (pace)');
+  if (openTune) {
+    gui.hide();
+    const style = document.createElement('style');
+    style.textContent =
+      '#tune-dock{position:fixed;left:50%;bottom:env(safe-area-inset-bottom,0);transform:translateX(-50%);z-index:15;max-width:100vw}' +
+      '#tune-dock .lil-gui{--widget-height:30px;--spacing:4px;--font-size:13px;--input-font-size:13px;--name-width:34%;width:min(340px,100vw)}' +
+      '#tune-dock .lil-gui .lil-controller{min-height:34px}';
+    const dock = document.createElement('div');
+    dock.id = 'tune-dock';
+    dock.append(tuneGui.domElement);
+    document.head.append(style);
+    document.body.append(dock);
+  }
   const show = (): void => {
     const { speed, density, sweep, eel } = tune;
     tune.values = JSON.stringify({ speed, density, sweep, eel });
     game.setTune({ speed, density, sweep, eel });
     valuesField.updateDisplay();
   };
-  tuneFolder.add(tune, 'speed', 0.5, 2, 0.05).name('speed x').onChange(show);
-  tuneFolder.add(tune, 'density', 0.5, 2, 0.05).name('density x').onChange(show);
-  tuneFolder.add(tune, 'sweep', 0.25, 2, 0.05).name('sweep x').onChange(show);
-  tuneFolder.add(tune, 'eel', 0, 2, 0.05).name('eel chance x').onChange(show);
-  const valuesField = tuneFolder.add(tune, 'values').name('values');
-  tuneFolder
+  tuneGui.add(tune, 'speed', 0.5, 2, 0.05).name('speed x').onChange(show);
+  tuneGui.add(tune, 'density', 0.5, 2, 0.05).name('density x').onChange(show);
+  tuneGui.add(tune, 'sweep', 0.25, 2, 0.05).name('sweep x').onChange(show);
+  tuneGui.add(tune, 'eel', 0, 2, 0.05).name('eel x').onChange(show);
+  const valuesField = tuneGui.add(tune, 'values').name('values');
+  tuneGui
     .add(
       {
         copy: () => {
@@ -148,18 +162,9 @@ export function installDevTools(game: Game, openTune = false): void {
     )
     .name('copy values');
   show();
-  if (openTune) {
-    gui.open();
-    tuneFolder.open();
-    gui.domElement.style.setProperty('--width', '300px');
-    gui.domElement.style.setProperty('--widget-height', '34px');
-    gui.domElement.style.setProperty('--font-size', '14px');
-  }
-  gui
-    .add(state, 'editor')
-    .name('path editor')
-    .onChange((on: boolean) => (editor.style.display = on ? 'block' : 'none'));
-  gui.add(state, 'lanes').name('lanes + hitboxes');
+  // Starts collapsed to its title bar; tap it to open.
+  if (openTune) tuneGui.close();
+
   const river = gui.addFolder('river fit');
   river.add(camera, 'focal', 600, 2000, 10).onFinishChange(apply);
   river.add(camera, 'horizonY', 0, 300, 1).onFinishChange(apply);

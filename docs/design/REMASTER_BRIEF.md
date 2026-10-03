@@ -97,13 +97,13 @@ eel/koi mix. One emitter for now; the second emitter for Braided Stream is Gate 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Still Water | 11 s | 0.8 | 1 | 22% | 3% | trace the chain; first eels |
 | 2 | First Spark | 12 s | 1 | 1 | 34% | 4% | eels in the chain |
-| 3 | Lantern Koi | 10 s | 1.6 | 1.25 | 25% | 14% | zigzag; choose the koi |
-| 4 | Twin Banks | 9 s | pinned, alternating every 3 s | 1.2 | 20% | 8% | long traversals |
+| 3 | Lantern Koi | 10 s | 1.6 | 1.25 | 28% | 14% | zigzag; choose the koi |
+| 4 | Twin Banks | 9 s | pinned, alternating every 3 s | 1.2 | 24% | 8% | long traversals |
 | 5 | Rising Tide | 14 s | 1 | 0.92 | 36% | 4% | density |
 | 6 | Neon Rapids | 14 s | 1.4 | 1 | 38% | 4% | dense zigzag |
 | 7 | Eel Storm | 10 s | 1 | 0.9 | 66% | 10% | thread through eels |
-| 8 | Braided Stream | 12 s | 1.3, quick reversals | 1 | 43% | 5% | weave |
-| 9 | Moonrise | 16 s | 1 | 1 | 46% | 6% | everything |
+| 8 | Braided Stream | 12 s | 1.3, quick reversals | 0.93 | 50% | 5% | weave |
+| 9 | Moonrise | 16 s | 1 | 0.93 | 52% | 6% | everything |
 
 After Moonrise the script loops phases 6–9 until the run ends.
 

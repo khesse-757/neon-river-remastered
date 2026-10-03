@@ -48,6 +48,8 @@ export class Input {
     on('keydown', (e) => {
       this.gesture();
       if (e.repeat) return;
+      // The audition tool is plain DOM over the game; its buttons keep their keys.
+      if (document.getElementById('audition')) return;
       // Sliders keep their own keys, but pause keys still work from one.
       if (e.target instanceof HTMLInputElement) {
         if (PAUSE_KEYS.has(e.code)) {

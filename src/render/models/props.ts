@@ -127,7 +127,7 @@ export class NetProp {
    */
   update(hoop: THREE.Vector3, grip: THREE.Vector3, velocity: number, lift: number, bulge: number, dt: number, charge: number): void {
     this.head.position.copy(hoop);
-    this.head.position.y += lift * this.radius * 1.1;
+    this.head.position.y += lift * this.radius * 1.5;
     this.dir.subVectors(grip, this.head.position);
     const yaw = Math.atan2(this.dir.x, this.dir.z);
     this.head.rotation.set(-lift * 0.5 * Math.cos(yaw), 0, lift * 0.5 * Math.sin(yaw));
@@ -375,7 +375,7 @@ export class BasketProp {
       );
       if (this.heap.instanceColor) this.heap.instanceColor.needsUpdate = true;
       // Gold, but under the bloom threshold: it should read as a glowing catch, not a lamp.
-      this.heapMaterial.emissive.copy(this.gold).multiplyScalar(glow * 0.42);
+      this.heapMaterial.emissive.copy(this.gold).multiplyScalar(glow * 0.22);
     }
     this.root.updateMatrixWorld(true);
     this.mouth.set(0, this.size * 1.2, 0).applyMatrix4(this.root.matrixWorld);

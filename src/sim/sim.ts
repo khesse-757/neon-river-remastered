@@ -42,8 +42,11 @@ export interface EmitterState {
   dir: 1 | -1;
   swingLeft: number;
   spawnTimer: number;
+  /** The next two spawns are rolled ahead so an eel can be announced a full lead early. */
   next: FishKind;
+  afterNext: FishKind;
   telegraphed: boolean;
+  afterTelegraphed: boolean;
 }
 
 export type RunStatus = 'playing' | 'won' | 'lost';
@@ -191,7 +194,9 @@ export class Sim {
       // Long enough that an eel opening a phase still gets its full warning.
       spawnTimer: this.config.telegraphLead + 0.05,
       next: this.rollKind(phase),
+      afterNext: this.rollKind(phase),
       telegraphed: false,
+      afterTelegraphed: false,
     };
   }
 
@@ -243,15 +248,23 @@ export class Sim {
     }
 
     emitter.spawnTimer -= dt;
-    if (!emitter.telegraphed && emitter.next === 'eel' && emitter.spawnTimer <= this.config.telegraphLead) {
+    const lead = this.config.telegraphLead;
+    if (!emitter.telegraphed && emitter.next === 'eel' && emitter.spawnTimer <= lead) {
       emitter.telegraphed = true;
+      this.events.push({ type: 'telegraph', lane: emitter.lane, kind: 'eel' });
+    }
+    // When fish come faster than the lead time, the eel after next is announced too.
+    if (!emitter.afterTelegraphed && emitter.afterNext === 'eel' && emitter.spawnTimer + pace.period <= lead) {
+      emitter.afterTelegraphed = true;
       this.events.push({ type: 'telegraph', lane: emitter.lane, kind: 'eel' });
     }
     if (emitter.spawnTimer <= 0) {
       this.spawn(emitter.next, emitter.lane);
       emitter.spawnTimer += pace.period;
-      emitter.next = this.rollKind(phase);
-      emitter.telegraphed = false;
+      emitter.next = emitter.afterNext;
+      emitter.telegraphed = emitter.afterTelegraphed;
+      emitter.afterNext = this.rollKind(phase);
+      emitter.afterTelegraphed = false;
     }
   }
 

@@ -98,8 +98,8 @@ const base = { sweepMul: 1, periodMul: 1, travelMul: 1, ...swing };
 export const PHASES: readonly PhaseSpec[] = [
   { ...base, id: 'still-water', name: 'Still Water', length: 11, sweepMul: 0.8, eelChance: 0.22, koiChance: 0.03 },
   { ...base, id: 'first-spark', name: 'First Spark', length: 12, eelChance: 0.34, koiChance: 0.04 },
-  { ...base, id: 'lantern-koi', name: 'Lantern Koi', length: 10, sweepMul: 1.6, periodMul: 1.25, eelChance: 0.25, koiChance: 0.14 },
-  { ...base, id: 'twin-banks', name: 'Twin Banks', length: 9, pinned: 3, periodMul: 1.2, eelChance: 0.2, koiChance: 0.08 },
+  { ...base, id: 'lantern-koi', name: 'Lantern Koi', length: 10, sweepMul: 1.6, periodMul: 1.25, eelChance: 0.28, koiChance: 0.14 },
+  { ...base, id: 'twin-banks', name: 'Twin Banks', length: 9, pinned: 3, periodMul: 1.2, eelChance: 0.24, koiChance: 0.08 },
   { ...base, id: 'rising-tide', name: 'Rising Tide', length: 14, periodMul: 0.92, eelChance: 0.36, koiChance: 0.04 },
   { ...base, id: 'neon-rapids', name: 'Neon Rapids', length: 14, sweepMul: 1.4, eelChance: 0.38, koiChance: 0.04 },
   { ...base, id: 'eel-storm', name: 'Eel Storm', length: 10, periodMul: 0.9, eelChance: 0.66, koiChance: 0.1 },
@@ -111,10 +111,11 @@ export const PHASES: readonly PhaseSpec[] = [
     sweepMul: 1.3,
     swingMin: 0.3,
     swingMax: 0.9,
-    eelChance: 0.43,
+    periodMul: 0.93,
+    eelChance: 0.5,
     koiChance: 0.05,
   },
-  { ...base, id: 'moonrise', name: 'Moonrise', length: 16, eelChance: 0.46, koiChance: 0.06 },
+  { ...base, id: 'moonrise', name: 'Moonrise', length: 16, periodMul: 0.93, sweepMul: 1, eelChance: 0.52, koiChance: 0.06 },
 ];
 
 export const DEFAULT_CONFIG: SimConfig = {
