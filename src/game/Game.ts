@@ -41,7 +41,7 @@ const EMITTER_READ = 0.24;
 const TOSS_TIME = 0.5;
 /** A weight pop rises and fades where the fish was caught. */
 const POP_SECONDS = 0.75;
-/** How long a speed-up's surge (current streaks, neon) lasts. */
+/** How long a speed-up's rush of current streaks lasts. */
 const SURGE_SECONDS = 1.6;
 
 const C = {
@@ -146,8 +146,6 @@ export class Game {
   /** Seconds left of a speed-up's surge. */
   private surge = 0;
   private streakTimer = 0;
-  /** Seconds left of the score tablet's pulse after a catch. */
-  private hudPulse = 0;
   private audioPeak = 0;
   private readonly panel: SettingsPanel;
   private telegraph: { lane: number; age: number } | null = null;
@@ -334,7 +332,6 @@ export class Game {
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startStage });
     this.banner = 0;
     this.surge = 0;
-    this.hudPulse = 0;
     this.audio.cancelWarning();
     this.fx = createRng(this.seed ^ 0x9e3779b9);
     this.accumulator = 0;
@@ -432,7 +429,7 @@ export class Game {
         this.bannerText = event.stage.name.toUpperCase();
         this.banner = this.config.bannerSeconds;
         if (event.index > 0) {
-          // A speed-up: stinger, current streaks down the river and a surge of neon.
+          // A speed-up: stinger and a rush of current streaks down the river. No flash, no neon.
           this.surge = SURGE_SECONDS;
           this.audio.speedUpSting(event.index);
           this.buzz(14);
@@ -471,7 +468,6 @@ export class Game {
           });
         }
         this.pops.push({ text: `+${event.weight}`, age: 0, fromX: p.x, fromY: p.y - 8, color: koi ? '#ffcc66' : '#c7e1e8' });
-        this.hudPulse = 0.22;
         this.buzz(koi ? 18 : 8);
         break;
       }
@@ -560,13 +556,12 @@ export class Game {
     }
     for (const pop of this.pops) pop.age += dt;
     while (this.pops[0] && this.pops[0].age > POP_SECONDS) this.pops.shift();
-    this.hudPulse = Math.max(0, this.hudPulse - dt);
 
     // The current: streaks of light run down the river, a rush of them at each speed-up and a
     // few more with every stage, so the water itself looks faster.
     this.surge = Math.max(0, this.surge - dt);
     const rush = this.surge / SURGE_SECONDS;
-    const streaks = this.mode === 'playing' && this.win === 0 ? state.stageIndex * 5 + 60 * rush * rush : 0;
+    const streaks = this.mode === 'playing' && this.win === 0 ? state.stageIndex * 4 + 36 * rush * rush : 0;
     const railSize = this.river.screenAt(1, 0.5).scale;
     this.streakTimer += dt * streaks;
     while (this.streakTimer >= 1) {
@@ -576,7 +571,8 @@ export class Game {
       const a = this.gridPoint(s, lane);
       const b = this.gridPoint(Math.min(this.river.maxS, s + 0.03), lane);
       const pull = (rush > 0 ? 20 : 14) * (0.8 + state.stageIndex * 0.15);
-      // Three dots in a line read as one streak.
+      // A few dots in a line read as one streak. Water-colored and below the bloom threshold:
+      // they should look like faster water, not sparks.
       const rel = a.scale / railSize;
       for (let k = 0; k < 5; k++)
         particles.emit({
@@ -585,9 +581,9 @@ export class Game {
           vx: (b.x - a.x) * pull,
           vy: (b.y - a.y) * pull,
           life: 0.5 - k * 0.05,
-          color: k === 0 ? C.white : C.shimmer,
-          size: 1.5 + rel * 2 - k * 0.2,
-          glow: this.reduceFlashing ? 0.9 : 1.7 - k * 0.2,
+          color: C.shimmer,
+          size: 1.2 + rel * 1.6 - k * 0.15,
+          glow: 0.6 - k * 0.06,
         });
     }
 
@@ -1038,11 +1034,7 @@ export class Game {
       jolt: shock > 0 && shock < (this.reduceFlashing ? 0.12 : 0.5) ? (Math.floor(shock * 30) % 2 === 0 ? 1 : -1) : 0,
       darken: Math.max(darken, dim),
       // The city surges on a win.
-      neon:
-        this.win > 0
-          ? 1 + 0.55 * THREE.MathUtils.smoothstep(this.win, 1, 2.2) * (0.85 + 0.15 * Math.sin(this.time * 6))
-          : // The city surges with each speed-up.
-            neonOut * (1 + (this.reduceFlashing ? 0.2 : 0.6) * (this.surge / SURGE_SECONDS) ** 2),
+      neon: this.win > 0 ? 1 + 0.55 * THREE.MathUtils.smoothstep(this.win, 1, 2.2) * (0.85 + 0.15 * Math.sin(this.time * 6)) : neonOut,
       flash,
       glitch: shock > 0 && shock < 0.06 && !this.reducedMotion ? 0.004 : 0,
       // A swell of gold as the celebration starts, settling to a faint warmth.
@@ -1076,19 +1068,12 @@ export class Game {
     // Without a gutter the tablet sits top-left under the pause button, over trees and sky: the
     // cobbles belong to the basket and the fisherman.
     const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : safe.top + controlSize + 8;
-    // The tablet pulses where it sits when a catch lands: a bright rim and a lit number.
-    const pulse = show && this.hudPulse > 0 && this.mode === 'playing';
-    v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? (pulse ? '#ffd98a' : '#030911') : null);
+    // The tablet stays calm: the number changes, nothing lights up (Kyle found a pulse distracting).
+    v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
-    v.panel('hud-lip', x, y, w, 1, show ? (pulse ? '#c5e1e8' : '#5f696c') : null);
+    v.panel('hud-lip', x, y, w, 1, show ? '#5f696c' : null);
     v.label('hud-caught-label', show ? 'CAUGHT' : '', x + 5, y + 3, '#a1987a');
-    v.label(
-      'hud-caught',
-      show ? `${s.caught}/${this.config.winWeight}` : '',
-      x + 5,
-      y + 12 - (pulse ? 1 : 0),
-      pulse ? '#ffffff' : '#9ccbcf',
-    );
+    v.label('hud-caught', show ? `${s.caught}/${this.config.winWeight}` : '', x + 5, y + 12, '#9ccbcf');
     v.label('hud-escaped-label', show ? 'ESCAPED' : '', x + 53, y + 3, '#a1987a');
     const danger = s.escaped >= this.config.maxEscaped - 6;
     v.label('hud-escaped', show ? `${s.escaped}/${this.config.maxEscaped}` : '', x + 53, y + 12, danger ? '#ff9933' : '#9ccbcf');

@@ -41,7 +41,7 @@ miss spends the 20-lb budget; an eel ends the night. Restart is one tap.
 
 - Every 1–3 s: pick the next fish in the chain, slide, scoop.
 - Every ~30 s: a speed-up, announced without a pause (stinger, sign, current
-  streaks, neon surge); the last stage swaps banks.
+  streaks); the last stage swaps banks.
 - Across ~2:15: the night changes (rain, storm, moonrise) as the run
   escalates; the basket and HUD both show progress toward 200.
 - A better player: reads the chain early, lets low-value fish go during
@@ -92,8 +92,9 @@ a flowing S-curve. Koi ~8%. Eels rare (~5%) and at least five fish apart.
 raises fish speed by 12% (the whole river's current picks up, so the chain
 keeps its spacing), shortens the spawn period, speeds the sweep, and adds
 randomness: swings that stop short and sudden mid-river reversals. Each is
-announced by a short stinger, the stage's sign, streaks of current down the
-river and a surge of neon. **Spawning never pauses for an announcement.**
+announced by a short stinger, the stage's sign, and quiet
+streaks of current down the river (no neon surge and no flash: Kyle found
+them distracting). **Spawning never pauses for an announcement.**
 
 **Stage 4, Bank to Bank** (after speed-up 3, until 200 lb). Fish and eels
 swap sides: a burst of 2–4 pinned at one bank, then immediately the other
@@ -151,8 +152,8 @@ bank, mixed with fast zigzags and eels dropped into the chain.
   hitbox slightly generous, eel hitbox slightly forgiving (≈85% of visual).
 - Scoop: fish slows, snaps toward net lane, shrinks into the net; splash, ripple
   ring, and a small weight pop (+1 / +5) that rises and fades at the catch
-  point while the score tablet pulses where it sits. Nothing flies across the
-  screen.
+  point. The score tablet does not light up or pulse. Nothing flies across
+  the screen.
 - **Catch sound:** a clean splash and a soft, short chime on the tonic or the
   fifth, which cannot clash with the music bed. **Fish Notes** (off by
   default, a setting): consecutive catches play the leitmotif's catch melody
