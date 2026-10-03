@@ -1347,7 +1347,8 @@ export class Game {
           ? (this.reduceFlashing ? 0.25 : 0.25 + 0.75 * Math.max(0, 1 - (this.win - 0.7) / 1.4) ** 2) *
             THREE.MathUtils.smoothstep(this.win, 0.5, 0.8)
           : 0,
-      drift: this.reducedMotion || !this.visuals.settings.drift ? 0 : (netLane - 0.5) * 3 + Math.sin(this.time * 0.13) * 1.2,
+      // A slow drift of the far layer only. It must not follow the net: the skyline then steps sideways with every move.
+      drift: this.reducedMotion || !this.visuals.settings.drift ? 0 : Math.sin(this.time * 0.13) * 1.2,
       surge: { front: surgeT * 1.15, strength: surgeOn ? Math.sin(Math.PI * Math.min(1, surgeT)) : 0 },
       shake: { x: Math.round(Math.sin(this.time * 90) * shakeK), y: Math.round(Math.cos(this.time * 71) * shakeK) },
       // He jumps on the fanfare's beat.
