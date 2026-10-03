@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # On a pull request HEAD is the merge commit, so HEAD^1..HEAD is the whole change.
           fetch-depth: 2
@@ -54,7 +54,7 @@ jobs:
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.changes.outputs.code == 'true'
         with:
           node-version: 22
@@ -68,7 +68,7 @@ jobs:
       - name: Cache Playwright browsers
         id: pwcache
         if: steps.changes.outputs.code == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
@@ -78,7 +78,7 @@ jobs:
       - name: Smoke
         if: steps.changes.outputs.code == 'true'
         run: npm run test:smoke
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-results
