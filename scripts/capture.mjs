@@ -40,7 +40,7 @@ for (const [mode, options] of Object.entries(VIEWS)) {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const d = window.__THREE_GAME_DIAGNOSTICS__;
       return {
-        palette: hooks.paletteReport(),
+        tris: d.renderer.triangles,
         layout: d.layout,
         calls: d.renderer.calls,
         phase: d.phase,

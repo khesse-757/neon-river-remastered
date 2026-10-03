@@ -1,0 +1,70 @@
+#!/usr/bin/env node
+// Records short active-play videos and measures frame rate through the test hooks.
+//   node scripts/record.mjs --url http://127.0.0.1:4188 --out docs/media/gate-1.5 [--seconds 9] [--query "actors=3x"] [--name play]
+import { mkdirSync, renameSync } from 'node:fs';
+import { chromium } from '@playwright/test';
+
+const args = Object.fromEntries(
+  process.argv.slice(2).reduce((acc, v, i, a) => (v.startsWith('--') ? [...acc, [v.slice(2), a[i + 1]]] : acc), []),
+);
+const url = args.url ?? 'http://127.0.0.1:5188';
+const out = args.out ?? 'artifacts/videos';
+const seconds = Number(args.seconds ?? 9);
+mkdirSync(out, { recursive: true });
+
+const VIEWS = {
+  desktop: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
+  mobile: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+};
+
+const browser = await chromium.launch({ channel: 'chromium' });
+for (const [mode, options] of Object.entries(VIEWS)) {
+  const context = await browser.newContext({ ...options, recordVideo: { dir: out, size: options.viewport } });
+  const page = await context.newPage();
+  await page.goto(`${url}/?seed=42&${args.query ?? ''}`);
+  await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.mode === 'title', null, { timeout: 20000 });
+  const stats = await page.evaluate(async (seconds) => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__;
+    await hooks.seed(42);
+    await hooks.setState('phase.lantern-koi');
+    hooks.setAutoplay(true);
+    const times = [];
+    let calls = 0;
+    let tris = 0;
+    await new Promise((resolve) => {
+      const start = performance.now();
+      let last = start;
+      const tick = (now) => {
+        times.push(now - last);
+        last = now;
+        const d = window.__THREE_GAME_DIAGNOSTICS__;
+        calls = Math.max(calls, d.renderer.calls);
+        tris = Math.max(tris, d.renderer.triangles);
+        if (now - start < seconds * 1000) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+    times.shift();
+    times.sort((a, b) => a - b);
+    const d = window.__THREE_GAME_DIAGNOSTICS__;
+    const avg = times.reduce((a, b) => a + b, 0) / times.length;
+    return {
+      fps: +(1000 / avg).toFixed(1),
+      p95ms: +times[Math.floor(times.length * 0.95)].toFixed(1),
+      maxCalls: calls,
+      maxTriangles: tris,
+      textures: d.renderer.textures,
+      geometries: d.renderer.geometries,
+      canvas: `${d.canvas.width}x${d.canvas.height}`,
+      pixelsPerTexel: d.layout.pixelsPerTexel,
+      caught: d.caught,
+    };
+  }, seconds);
+  const video = page.video();
+  await context.close();
+  const file = `${out}/${args.name ?? 'active-play'}-${mode}.webm`;
+  renameSync(await video.path(), file);
+  console.log(`${file} ${JSON.stringify(stats)}`);
+}
+await browser.close();

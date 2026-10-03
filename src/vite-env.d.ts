@@ -13,19 +13,13 @@ interface ThreeGameDiagnostics {
   streak: number;
   fish: number;
   net: { lane: number; velocity: number };
-  fishStyle: string;
+  actors: string;
+  basket: number;
   audioErrors: number;
-  renderer: { calls: number; triangles: number; geometries: number; textures: number };
+  renderer: { calls: number; triangles: number; geometries: number; textures: number; programs: number };
   canvas: { clientWidth: number; clientHeight: number; width: number; height: number; dpr: number };
-  layout: { scale: number; targetW: number; targetH: number; gridW: number; gridH: number };
+  layout: { scale: number; targetW: number; targetH: number; gridW: number; gridH: number; pixelsPerTexel: number };
   rippleEncoding: string;
-}
-
-interface PaletteReport {
-  texels: number;
-  offPalette: number;
-  colorsUsed: number;
-  paletteSize: number;
 }
 
 interface ThreeGameTestHooks {
@@ -41,8 +35,6 @@ interface ThreeGameTestHooks {
   hideDebugUi(hidden: boolean): void | Promise<void>;
   /** Let the built-in fish tracker drive the net (smoke tests, captures). */
   setAutoplay(enabled: boolean): void;
-  /** Counts texels of the final low-res frame that are not palette colors. */
-  paletteReport(): PaletteReport;
 }
 
 interface Window {

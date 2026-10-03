@@ -1,65 +1,59 @@
 import * as THREE from 'three';
-import { FISH_COLORS, FISH_SPRITES, LANTERN } from '../data/sprites';
-import type { FishKind } from '../sim/config';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { Pass } from 'three/addons/postprocessing/Pass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import type { River } from '../sim/river';
-import { hexToRgb, paletteColor, type AtlasRect, type SceneAssets } from './assets';
+import { color, hexToRgb, type SceneAssets } from './assets';
 import { computeLayout, type Layout } from './layout';
+import { FishSchool, type FishInstance } from './models/fish';
+import { BasketProp, LanternProp, NetProp } from './models/props';
 import { Particles } from './Particles';
 import { rasterizeText } from './PixelText';
 import { RippleField } from './RippleField';
 import * as GLSL from './shaders';
 
-const MAX_FISH = 64;
-const MAX_LIGHTS = 8;
-/** The sprites are authored for this grid width; other grids pick the closest authored size. */
-const AUTHORED_GRID_W = 216;
+const WATER_LIGHTS = 6;
+const EEL_LIGHTS = 3;
+/** Render layers of the actor scene. */
+const LAYER_RIVER = 1;
+const LAYER_NET = 2;
+const LAYER_BRIDGE = 3;
 
-export interface FishView {
-  readonly kind: FishKind;
-  /** Painting-grid position of the fish. */
+export interface WaterLight {
   readonly x: number;
-  readonly y: number;
-  /** Projected size relative to a fish at the net rail (0..1+). */
-  readonly rel: number;
-  /** Screen heading as dx/dy, for leaning the sprite. */
-  readonly slope: number;
-  readonly phase: number;
-  /** 1 while swimming, falling to 0 as it is scooped. */
-  readonly scoop: number;
-  readonly flash: number;
-  readonly worldX: number;
-  readonly worldZ: number;
-  readonly heading: number;
-}
-
-export interface LightView {
-  readonly x: number;
-  readonly y: number;
+  readonly z: number;
   readonly radius: number;
   readonly intensity: number;
-  readonly color: THREE.Vector3;
+  readonly color: THREE.Color;
 }
 
 export interface FrameView {
   readonly time: number;
   readonly dt: number;
-  readonly fish: readonly FishView[];
-  readonly netX: number;
-  readonly netY: number;
-  readonly netRadius: number;
-  readonly netKick: number;
-  readonly netVisible: boolean;
-  readonly lights: readonly LightView[];
+  /** Fish under the water (world space: x right, y up, z away from the camera). */
+  readonly fish: readonly FishInstance[];
+  /** Fish above the surface: in the net, or flying to the basket. */
+  readonly airFish: readonly FishInstance[];
+  readonly net: { x: number; z: number; velocity: number; lift: number; bulge: number; charge: number; visible: boolean };
+  readonly basketFill: number;
+  readonly waterLights: readonly WaterLight[];
+  /** Brightest eels near the net, for real point lights on the props. */
+  readonly eelLights: readonly { x: number; z: number; intensity: number }[];
   readonly lantern: number;
   readonly breath: number;
   readonly lean: number;
   readonly jolt: number;
   readonly darken: number;
   readonly neon: number;
+  readonly flash: number;
   readonly glitch: number;
+  /** Far-layer parallax in texels. */
+  readonly drift: number;
 }
 
-export type FishStyle = 'flat' | 'voxel';
+/** How the 3D layer is rendered: at device pixels, or at three pixels per painting texel. */
+export type ActorResolution = 'device' | '3x';
 
 interface UiItem {
   mesh: THREE.Mesh;
@@ -74,56 +68,68 @@ function unitQuad(min: number, max: number): THREE.BufferGeometry {
   return g;
 }
 
+/** Renders the whole scene into the composer's buffer in a fixed order. */
+class ScenePass extends Pass {
+  constructor(private readonly draw: (renderer: THREE.WebGLRenderer, target: THREE.WebGLRenderTarget) => void) {
+    super();
+    this.needsSwap = false;
+  }
+  override render(renderer: THREE.WebGLRenderer, _write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget): void {
+    this.draw(renderer, read);
+  }
+}
+
 export class SceneRenderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly ripples: RippleField;
   readonly particles: Particles;
+  readonly net: NetProp;
+  readonly lantern: LanternProp;
+  readonly basket: BasketProp;
   layout: Layout;
-  fishStyle: FishStyle = 'flat';
-  /** Painting-grid position of the lantern flame. */
-  readonly lanternPos: { x: number; y: number };
-  /** Painting-grid position of the fisherman's hands. */
-  readonly grip: { x: number; y: number };
+  /** Pixels per painting texel in the internal render (equals layout.scale at device resolution). */
+  pixelsPerTexel = 1;
+  /** World position of the fisherman's hands. */
+  readonly grip = new THREE.Vector3();
+  readonly triangles: { fish: Record<string, number> };
 
-  private readonly camera = new THREE.Camera();
-  private readonly under = new THREE.Scene();
-  private readonly over = new THREE.Scene();
-  private readonly voxelScene = new THREE.Scene();
-  private readonly voxelCamera: THREE.PerspectiveCamera;
-  private readonly compositeScene = new THREE.Scene();
-  private readonly blitScene = new THREE.Scene();
-  private sceneTarget: THREE.WebGLRenderTarget;
-  private compositeTarget: THREE.WebGLRenderTarget;
-
+  private readonly identity = new THREE.Camera();
+  private readonly camera: THREE.PerspectiveCamera;
+  private readonly world = new THREE.Scene();
+  private readonly surface = new THREE.Scene();
+  private readonly actors = new THREE.Scene();
+  private readonly flat = new THREE.Scene();
+  private readonly fx = new THREE.Scene();
+  private readonly uiScene = new THREE.Scene();
+  private readonly composer: EffectComposer;
+  private readonly bloom: UnrealBloomPass;
+  private readonly final: ShaderPass;
   private readonly quad01 = unitQuad(0, 1);
   private readonly quadFull = unitQuad(-1, 1);
   private readonly shared: Record<string, THREE.IUniform>;
-  private readonly lights: THREE.Vector4[] = [];
-  private readonly lightColors: THREE.Vector3[] = [];
-  private readonly fishGeometry = new THREE.InstancedBufferGeometry();
-  private readonly fishAttrs: Record<'iPos' | 'iRect' | 'iAnim' | 'iLook', THREE.InstancedBufferAttribute>;
-  private readonly fishMesh: THREE.Mesh;
-  private readonly netMaterial: THREE.ShaderMaterial;
-  private readonly netMesh: THREE.Mesh;
+  private readonly uiTarget = { value: new THREE.Vector2(1, 1) };
+  private readonly waterLights: THREE.Vector4[] = [];
+  private readonly waterLightColors: THREE.Vector3[] = [];
+  private readonly fish: FishSchool;
+  private readonly airFish: FishSchool;
   private readonly fishermanMaterial: THREE.ShaderMaterial;
-  private readonly lanternMaterial: THREE.ShaderMaterial;
-  private readonly compositeMaterial: THREE.ShaderMaterial;
-  private readonly blitMaterial: THREE.ShaderMaterial;
-  private readonly voxels: THREE.InstancedMesh;
-  private readonly voxelMaterial: THREE.ShaderMaterial;
-  private readonly voxelSize: number;
+  private readonly lanternLight: THREE.PointLight;
+  private readonly eelLights: THREE.PointLight[] = [];
+  private readonly moon: THREE.DirectionalLight;
   private readonly ui = new Map<string, UiItem>();
   private readonly white: THREE.DataTexture;
-  private readonly deep = paletteColor('#042c58');
+  private readonly temp = new THREE.Vector3();
+  private readonly hoop = new THREE.Vector3();
+  private netVisible = true;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     readonly assets: SceneAssets,
-    river: River,
-    options: { forceByteRipples?: boolean } = {},
+    readonly river: River,
+    private readonly options: { forceByteRipples?: boolean; actors?: ActorResolution; netRadius: number } = { netRadius: 0.08 },
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
-    this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
@@ -131,43 +137,55 @@ export class SceneRenderer {
 
     const { gridW, gridH } = assets;
     this.layout = computeLayout(gridW, gridH, gridW, gridH);
-    this.sceneTarget = this.makeTarget(true);
-    this.compositeTarget = this.makeTarget(false);
     this.ripples = new RippleField(this.renderer, gridW, gridH, assets.maskA, this.quadFull, options.forceByteRipples);
+    this.ripples.setLinear();
 
-    const sx = gridW / 768;
-    this.lanternPos = { x: Math.round(470 * sx), y: Math.round(1052 * sx) };
-    this.grip = { x: 553 * sx, y: 1266 * sx };
+    const cam = river.camera.spec;
+    this.camera = new THREE.PerspectiveCamera(THREE.MathUtils.radToDeg(2 * Math.atan(688 / cam.focal)), 768 / 1376, 0.05, 60);
+    this.camera.position.set(0, cam.height, 0);
+    this.camera.rotation.set(-river.camera.pitch, 0, 0);
+    this.camera.layers.enableAll();
 
-    for (let i = 0; i < MAX_LIGHTS; i++) {
-      this.lights.push(new THREE.Vector4(0, 0, 1, 0));
-      this.lightColors.push(new THREE.Vector3());
+    for (let i = 0; i < WATER_LIGHTS; i++) {
+      this.waterLights.push(new THREE.Vector4(0, 0, 1, 0));
+      this.waterLightColors.push(new THREE.Vector3());
     }
     this.shared = {
-      uTarget: { value: new THREE.Vector2(gridW, gridH) },
+      uCanvas: { value: new THREE.Vector2(gridW, gridH) },
+      uScale: { value: 1 },
       uOrigin: { value: new THREE.Vector2() },
       uGrid: { value: new THREE.Vector2(gridW, gridH) },
       uTime: { value: 0 },
       uBg: { value: assets.bg },
       uMaskA: { value: assets.maskA },
       uMaskB: { value: assets.maskB },
+      uField: { value: assets.field },
+      uNoise: { value: assets.noise },
       uRipple: { value: this.ripples.texture },
-      uLights: { value: this.lights },
-      uLightColors: { value: this.lightColors },
+      uCam: { value: new THREE.Vector4(cam.focal, cam.centerX, cam.centerY, cam.height) },
+      uPitch: { value: new THREE.Vector2(Math.sin(river.camera.pitch), Math.cos(river.camera.pitch)) },
+      uSrcPerTexel: { value: 768 / gridW },
       uLantern: { value: new THREE.Vector4(0, 0, 1, 0) },
       uWind: { value: 0.9 },
       uNeon: { value: 1 },
       uDarken: { value: 0 },
+      uDrift: { value: 0 },
+      uFlash: { value: 0 },
+      uTarget: { value: new THREE.Vector2(gridW, gridH) },
     };
     const rippleDefines = RippleField.defines(this.ripples.byteEncoded);
-    const layer = (fragmentShader: string, extra: Record<string, THREE.IUniform>, defines?: Record<string, string>): THREE.ShaderMaterial =>
+    const layer = (fragmentShader: string, extra: Record<string, THREE.IUniform> = {}, blend = false): THREE.ShaderMaterial =>
       new THREE.ShaderMaterial({
         vertexShader: GLSL.FULLSCREEN_VERT,
         fragmentShader,
         uniforms: { ...this.shared, ...extra },
-        defines,
+        defines: rippleDefines,
         depthTest: false,
         depthWrite: false,
+        transparent: blend,
+        blending: blend ? THREE.CustomBlending : THREE.NormalBlending,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
       });
     const add = (scene: THREE.Scene, geometry: THREE.BufferGeometry, material: THREE.Material, order: number): THREE.Mesh => {
       const mesh = new THREE.Mesh(geometry, material);
@@ -177,55 +195,63 @@ export class SceneRenderer {
       return mesh;
     };
 
-    // Under the surface: the painting and its water, then the fish.
-    add(this.under, this.quadFull, layer(GLSL.BACKGROUND_FRAG, { uReflect: { value: 1 } }, rippleDefines), 0);
-
-    this.fishGeometry.index = this.quad01.index;
-    this.fishGeometry.setAttribute('position', this.quad01.getAttribute('position'));
-    const attr = (size: number): THREE.InstancedBufferAttribute => {
-      const a = new THREE.InstancedBufferAttribute(new Float32Array(MAX_FISH * size), size);
-      a.setUsage(THREE.DynamicDrawUsage);
-      return a;
-    };
-    this.fishAttrs = { iPos: attr(2), iRect: attr(4), iAnim: attr(4), iLook: attr(4) };
-    for (const [name, a] of Object.entries(this.fishAttrs)) this.fishGeometry.setAttribute(name, a);
-    this.fishGeometry.instanceCount = 0;
-    this.fishMesh = add(
-      this.under,
-      this.fishGeometry,
-      new THREE.ShaderMaterial({
-        vertexShader: GLSL.SPRITE_VERT,
-        fragmentShader: GLSL.SPRITE_FRAG,
-        uniforms: {
-          uTarget: this.shared.uTarget!,
-          uAtlas: { value: assets.atlas },
-          uDeep: { value: this.deep },
-          uDarken: this.shared.uDarken!,
+    add(this.world, this.quadFull, layer(GLSL.WORLD_FRAG), 0);
+    const moonDir = new THREE.Vector3(-0.35, 0.75, 0.55).normalize();
+    add(
+      this.surface,
+      this.quadFull,
+      layer(
+        GLSL.SURFACE_FRAG,
+        {
+          uMoonDir: { value: moonDir },
+          uLights: { value: this.waterLights },
+          uLightColors: { value: this.waterLightColors },
+          uReflect: { value: 1 },
         },
-        side: THREE.DoubleSide,
-        depthTest: false,
-        depthWrite: false,
-      }),
-      1,
+        true,
+      ),
+      0,
     );
+    add(this.surface, this.quadFull, layer(GLSL.OCCLUDER_FRAG), 1);
 
-    // Over the fish: surface highlights and occluders, the net, the fisherman, particles, UI.
-    add(this.over, this.quadFull, layer(GLSL.OVERLAY_FRAG, { uGlint: { value: 0 } }, rippleDefines), 0);
-    this.netMaterial = new THREE.ShaderMaterial({
-      vertexShader: GLSL.FULLSCREEN_VERT,
-      fragmentShader: GLSL.NET_FRAG,
-      uniforms: {
-        uTarget: this.shared.uTarget!,
-        uGrip: { value: new THREE.Vector2() },
-        uHoop: { value: new THREE.Vector2() },
-        uRadii: { value: new THREE.Vector2(10, 4) },
-        uKick: { value: 0 },
-        uDarken: this.shared.uDarken!,
-      },
-      depthTest: false,
-      depthWrite: false,
-    });
-    this.netMesh = add(this.over, this.quadFull, this.netMaterial, 1);
+    // Real lights for the 3D actors. Actor space flips z (three looks down -z).
+    const hemi = new THREE.HemisphereLight(color('#40649a'), color('#0b1622'), 1.5);
+    this.moon = new THREE.DirectionalLight(color('#b7d2ff'), 2.4);
+    this.moon.position.set(moonDir.x, moonDir.y, -moonDir.z).multiplyScalar(10);
+    const neon = new THREE.DirectionalLight(color('#a06bff'), 0.9);
+    neon.position.set(0.5, 0.35, -1).multiplyScalar(10);
+    this.lanternLight = new THREE.PointLight(color('#ffb060'), 0.05, 1.1, 2);
+    const lights: THREE.Light[] = [hemi, this.moon, neon, this.lanternLight];
+    for (let i = 0; i < EEL_LIGHTS; i++) {
+      const light = new THREE.PointLight(color('#39e6ee'), 0, 0.55, 2);
+      this.eelLights.push(light);
+      lights.push(light);
+    }
+    for (const light of lights) {
+      light.layers.enableAll();
+      this.actors.add(light);
+    }
+
+    const fog = color('#063152');
+    this.fish = new FishSchool(assets.ramp, fog, LAYER_RIVER);
+    this.airFish = new FishSchool(assets.ramp, fog, LAYER_BRIDGE);
+    this.actors.add(this.fish.group, this.airFish.group);
+    this.triangles = { fish: this.fish.triangles };
+
+    this.net = new NetProp(assets.ramp, options.netRadius, LAYER_NET);
+    this.actors.add(this.net.root);
+
+    // Things on the bridge are placed by unprojecting painting pixels onto planes at bridge height.
+    const place = (px: number, py: number, height: number): THREE.Vector3 => {
+      const p = river.camera.unprojectAtHeight(px, py, height);
+      return new THREE.Vector3(p.x, p.y, -p.z);
+    };
+    this.grip.copy(place(553, 1266, 0.2));
+    this.lantern = new LanternProp(assets.ramp, 0.04, LAYER_BRIDGE);
+    this.lantern.root.position.copy(place(476, 1064, 0.1));
+    this.basket = new BasketProp(assets.ramp, 0.052, LAYER_BRIDGE);
+    this.basket.root.position.copy(place(382, 1262, 0.1));
+    this.actors.add(this.lantern.root, this.basket.root);
 
     this.fishermanMaterial = new THREE.ShaderMaterial({
       vertexShader: GLSL.QUAD_VERT,
@@ -237,111 +263,91 @@ export class SceneRenderer {
         uBreath: { value: 0 },
         uLean: { value: 0 },
         uJolt: { value: 0 },
-        uRim: { value: 0.2 },
+        uLightDir: { value: new THREE.Vector3(-0.7, -0.45, 0.55) },
+        uLight: { value: 0.5 },
+        uFlash: this.shared.uFlash!,
         uDarken: this.shared.uDarken!,
       },
       side: THREE.DoubleSide,
       depthTest: false,
       depthWrite: false,
     });
-    add(this.over, this.quad01, this.fishermanMaterial, 2);
-
-    this.lanternMaterial = this.quadMaterial(assets.lantern);
-    add(this.over, this.quad01, this.lanternMaterial, 3);
+    add(this.flat, this.quad01, this.fishermanMaterial, 0);
 
     this.particles = new Particles(this.quad01, this.shared.uTarget as { value: THREE.Vector2 });
-    this.particles.mesh.renderOrder = 4;
-    this.over.add(this.particles.mesh);
+    this.fx.add(this.particles.mesh);
 
     this.white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
     this.white.needsUpdate = true;
 
-    // Voxel fish (look-dev A/B) share the painting's camera.
-    const cam = river.camera.spec;
-    this.voxelCamera = new THREE.PerspectiveCamera(THREE.MathUtils.radToDeg(2 * Math.atan(688 / cam.focal)), 768 / 1376, 0.05, 60);
-    this.voxelCamera.position.set(0, cam.height, 0);
-    this.voxelCamera.rotation.set(-river.camera.pitch, 0, 0);
-    this.voxelCamera.updateMatrixWorld();
-    this.voxelSize = 768 / gridW / river.screenAt(1, 0.5).scale;
-    this.voxelMaterial = new THREE.ShaderMaterial({
-      vertexShader: GLSL.VOXEL_VERT,
-      fragmentShader: GLSL.VOXEL_FRAG,
-      uniforms: { uDeep: { value: this.deep }, uTint: { value: 0.18 }, uDarken: this.shared.uDarken! },
-    });
-    this.voxels = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.voxelMaterial, 6000);
-    this.voxels.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.voxels.setColorAt(0, new THREE.Color(1, 1, 1));
-    this.voxels.count = 0;
-    this.voxels.frustumCulled = false;
-    this.voxelScene.add(this.voxels);
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new ScenePass((renderer, target) => this.drawScene(renderer, target)));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(gridW, gridH), 0.55, 0.45, 0.9);
+    this.composer.addPass(this.bloom);
+    this.final = new ShaderPass(
+      new THREE.ShaderMaterial({
+        vertexShader: GLSL.FINAL_VERT,
+        fragmentShader: GLSL.FINAL_FRAG,
+        uniforms: {
+          tDiffuse: { value: null },
+          uLut: { value: assets.lut },
+          uGrade: { value: 0.18 },
+          uVignette: { value: 0.35 },
+          uGlitch: { value: 0 },
+        },
+      }),
+    );
+    this.composer.addPass(this.final);
 
-    this.compositeMaterial = new THREE.ShaderMaterial({
-      vertexShader: GLSL.FULLSCREEN_VERT,
-      fragmentShader: GLSL.COMPOSITE_FRAG,
-      uniforms: {
-        uScene: { value: this.sceneTarget.texture },
-        uLut: { value: assets.lut },
-        uPalette: { value: assets.paletteTexture },
-        uTarget: this.shared.uTarget!,
-        uOrigin: this.shared.uOrigin!,
-        uGrid: this.shared.uGrid!,
-        uDither: { value: 0.9 },
-        uGlitch: { value: 0 },
-      },
-      depthTest: false,
-      depthWrite: false,
-    });
-    add(this.compositeScene, this.quadFull, this.compositeMaterial, 0);
-    this.blitMaterial = new THREE.ShaderMaterial({
-      vertexShader: GLSL.FULLSCREEN_VERT,
-      fragmentShader: GLSL.BLIT_FRAG,
-      uniforms: {
-        uFrame: { value: this.compositeTarget.texture },
-        uTarget: this.shared.uTarget!,
-        uCanvas: { value: new THREE.Vector2() },
-        uScale: { value: 1 },
-      },
-      depthTest: false,
-      depthWrite: false,
-    });
-    add(this.blitScene, this.quadFull, this.blitMaterial, 0);
-
-    this.resize();
+    this.resize(true);
   }
 
   /** Match the canvas to its CSS box at device resolution; returns true when the layout changed. */
-  resize(): boolean {
-    const dpr = window.devicePixelRatio || 1;
+  resize(force = false): boolean {
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
     const h = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
-    if (w === this.layout.canvasW && h === this.layout.canvasH && this.canvas.width === w) return false;
+    if (!force && w === this.layout.canvasW && h === this.layout.canvasH && this.canvas.width === w) return false;
     this.layout = computeLayout(w, h, this.assets.gridW, this.assets.gridH);
-    const { targetW, targetH, originX, originY, scale } = this.layout;
+    const { originX, originY, scale } = this.layout;
+    const k = this.options.actors === '3x' ? Math.min(3, scale) : scale;
+    this.pixelsPerTexel = k;
+    const iw = Math.max(1, Math.round((w * k) / scale));
+    const ih = Math.max(1, Math.round((h * k) / scale));
     this.renderer.setSize(w, h, false);
-    this.sceneTarget.setSize(targetW, targetH);
-    this.compositeTarget.setSize(targetW, targetH);
-    (this.shared.uTarget!.value as THREE.Vector2).set(targetW, targetH);
+    this.composer.setSize(iw, ih);
+    for (const target of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      target.texture.magFilter = THREE.NearestFilter;
+      target.texture.minFilter = THREE.NearestFilter;
+    }
+    (this.shared.uCanvas!.value as THREE.Vector2).set(iw, ih);
+    this.shared.uScale!.value = k;
     (this.shared.uOrigin!.value as THREE.Vector2).set(originX, originY);
-    (this.blitMaterial.uniforms.uCanvas!.value as THREE.Vector2).set(w, h);
-    this.blitMaterial.uniforms.uScale!.value = scale;
+    (this.shared.uTarget!.value as THREE.Vector2).set(iw / k, ih / k);
+    this.uiTarget.value.set(w / scale, h / scale);
+    // The 3D camera sees exactly the painting's rectangle; the view offset extends it to the gutters.
+    this.camera.setViewOffset(this.assets.gridW * k, this.assets.gridH * k, -originX * k, -originY * k, iw, ih);
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
     const f = this.assets.fishermanRect;
     (this.fishermanMaterial.uniforms.uRect!.value as THREE.Vector4).set(originX + f.x, originY + f.y, f.width, f.height);
-    (this.lanternMaterial.uniforms.uRect!.value as THREE.Vector4).set(
-      originX + this.lanternPos.x - Math.floor(LANTERN.width / 2),
-      originY + this.lanternPos.y - LANTERN.height + 3,
-      LANTERN.width,
-      LANTERN.height,
-    );
     return true;
   }
 
-  /** Text or a flat panel placed in target texels. Pass an empty string to remove it. */
+  /** Painting-texel position of a point in actor space (three coordinates). */
+  toTexel(p: THREE.Vector3): { x: number; y: number } {
+    this.temp.copy(p).project(this.camera);
+    const target = this.shared.uTarget!.value as THREE.Vector2;
+    return { x: ((this.temp.x + 1) / 2) * target.x - this.layout.originX, y: ((1 - this.temp.y) / 2) * target.y - this.layout.originY };
+  }
+
+  /** Text placed in target texels. Returns its width; an empty string hides it. */
   label(
     id: string,
     text: string,
     x: number,
     y: number,
-    color: string,
+    hex: string,
     align: 'left' | 'center' | 'right' = 'left',
     shadow = true,
     title = false,
@@ -353,20 +359,20 @@ export class SceneRenderer {
       if (item) item.mesh.visible = false;
       return 0;
     }
-    const key = `${text}|${color}`;
+    const key = `${text}|${hex}`;
     if (!item) {
-      const material = this.quadMaterial(this.white, false, true);
+      const material = this.quadMaterial(this.white, false);
       const mesh = new THREE.Mesh(this.quad01, material);
       mesh.frustumCulled = false;
       mesh.renderOrder = shadow ? 21 : 20;
-      this.over.add(mesh);
+      this.uiScene.add(mesh);
       item = { mesh, material, text: '' };
       this.ui.set(id, item);
     }
     if (item.text !== key) {
       const old = item.material.uniforms.uMap!.value as THREE.Texture;
       if (old !== this.white) old.dispose();
-      const bitmap = rasterizeText(text, hexToRgb(color), title);
+      const bitmap = rasterizeText(text, hexToRgb(hex), title);
       item.material.uniforms.uMap!.value = bitmap.texture;
       (item.material.uniforms.uRect!.value as THREE.Vector4).set(0, 0, bitmap.width, bitmap.height);
       item.text = key;
@@ -378,24 +384,24 @@ export class SceneRenderer {
     return rect.z;
   }
 
-  /** Flat palette-colored rectangle in target texels (HUD tablet, banner board). */
-  panel(id: string, x: number, y: number, w: number, h: number, color: string | null, order = 10): void {
+  /** Flat rectangle in target texels (HUD tablet, banner board, buttons). */
+  panel(id: string, x: number, y: number, w: number, h: number, hex: string | null, order = 10): void {
     let item = this.ui.get(id);
-    if (!color) {
+    if (!hex) {
       if (item) item.mesh.visible = false;
       return;
     }
     if (!item) {
-      const material = this.quadMaterial(this.white, true, true);
+      const material = this.quadMaterial(this.white, true);
       const mesh = new THREE.Mesh(this.quad01, material);
       mesh.frustumCulled = false;
-      this.over.add(mesh);
+      this.uiScene.add(mesh);
       item = { mesh, material, text: '' };
       this.ui.set(id, item);
     }
-    const rect = item.material.uniforms.uRect!.value as THREE.Vector4;
-    rect.set(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-    item.material.uniforms.uTint!.value = paletteColor(color);
+    (item.material.uniforms.uRect!.value as THREE.Vector4).set(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+    const [r, g, b] = hexToRgb(hex);
+    (item.material.uniforms.uTint!.value as THREE.Vector3).set(r / 255, g / 255, b / 255);
     item.material.uniforms.uTintMix!.value = 1;
     item.mesh.renderOrder = order;
     item.mesh.visible = true;
@@ -403,190 +409,105 @@ export class SceneRenderer {
 
   render(view: FrameView): void {
     const { renderer, layout } = this;
-    const { originX, originY, targetH } = layout;
     renderer.info.reset();
-    this.shared.uTime!.value = view.time;
-    this.shared.uNeon!.value = view.neon;
-    this.shared.uDarken!.value = view.darken;
-    this.compositeMaterial.uniforms.uGlitch!.value = view.glitch;
+    const s = this.shared;
+    s.uTime!.value = view.time;
+    s.uNeon!.value = view.neon;
+    s.uDarken!.value = view.darken;
+    s.uDrift!.value = view.drift;
+    s.uFlash!.value = view.flash;
+    this.final.uniforms.uGlitch!.value = view.glitch;
 
-    for (let i = 0; i < MAX_LIGHTS; i++) {
-      const l = view.lights[i];
+    for (let i = 0; i < WATER_LIGHTS; i++) {
+      const l = view.waterLights[i];
       if (l) {
-        this.lights[i]?.set(originX + l.x, originY + l.y, l.radius, l.intensity);
-        this.lightColors[i]?.copy(l.color);
-      } else this.lights[i]?.set(0, 0, 1, 0);
+        this.waterLights[i]?.set(l.x, l.z, l.radius, l.intensity);
+        this.waterLightColors[i]?.set(l.color.r, l.color.g, l.color.b);
+      } else this.waterLights[i]?.set(0, 0, 1, 0);
     }
-    const gridScale = this.assets.gridW / AUTHORED_GRID_W;
-    (this.shared.uLantern!.value as THREE.Vector4).set(
-      originX + this.lanternPos.x,
-      originY + this.lanternPos.y - 4,
-      46 * gridScale,
-      view.lantern,
-    );
+    this.eelLights.forEach((light, i) => {
+      const e = view.eelLights[i];
+      light.intensity = e ? e.intensity * 0.05 : 0;
+      if (e) light.position.set(e.x, 0.03, -e.z);
+    });
 
-    this.netMesh.visible = view.netVisible;
-    const net = this.netMaterial.uniforms;
-    (net.uHoop!.value as THREE.Vector2).set(originX + Math.round(view.netX) + 0.5, originY + Math.round(view.netY) + 0.5);
-    (net.uGrip!.value as THREE.Vector2).set(originX + this.grip.x, originY + this.grip.y);
-    (net.uRadii!.value as THREE.Vector2).set(view.netRadius, Math.max(3, Math.round(view.netRadius * 0.42)));
-    net.uKick!.value = view.netKick;
+    this.lantern.update(view.time, view.lantern);
+    this.lanternLight.position.copy(this.lantern.flame);
+    this.lanternLight.intensity = 0.045 * view.lantern * (1 - view.darken);
+    const flame = this.toTexel(this.lantern.flame);
+    const gs = this.assets.gridW / 216;
+    (s.uLantern!.value as THREE.Vector4).set(flame.x, flame.y + 9 * gs, 40 * gs, 0.55 * view.lantern);
+    this.moon.intensity = 2.4 * (1 - view.darken * 0.7) + view.flash * 6;
+
+    this.netVisible = view.net.visible;
+    this.net.root.visible = view.net.visible;
+    this.hoop.set(view.net.x, -this.net.radius * 0.12, -view.net.z);
+    this.net.update(this.hoop, this.grip, view.net.velocity, view.net.lift, view.net.bulge, view.dt, view.net.charge);
+    this.basket.update(view.basketFill, view.dt);
 
     const man = this.fishermanMaterial.uniforms;
     man.uBreath!.value = view.breath;
     man.uLean!.value = view.lean;
     man.uJolt!.value = view.jolt;
-    man.uRim!.value = Math.min(0.7, view.lantern * 0.6);
+    man.uLight!.value = 0.5 * view.lantern;
 
-    if (this.fishStyle === 'flat') this.updateSprites(view.fish);
-    else this.updateVoxels(view.fish);
-    this.fishMesh.visible = this.fishStyle === 'flat';
-    this.particles.update(view.dt, originX, originY);
+    this.fish.update(view.fish);
+    this.airFish.update(view.airFish);
+    this.particles.update(view.dt, layout.originX, layout.originY);
     this.ripples.update(renderer, view.dt);
-    this.shared.uRipple!.value = this.ripples.texture;
+    s.uRipple!.value = this.ripples.texture;
 
-    renderer.setRenderTarget(this.sceneTarget);
-    renderer.clear();
-    renderer.render(this.under, this.camera);
-    if (this.fishStyle === 'voxel') {
-      const y = targetH - originY - this.assets.gridH;
-      this.sceneTarget.viewport.set(originX, y, this.assets.gridW, this.assets.gridH);
-      this.sceneTarget.scissor.set(originX, y, this.assets.gridW, this.assets.gridH);
-      this.sceneTarget.scissorTest = true;
-      renderer.setRenderTarget(this.sceneTarget);
-      renderer.render(this.voxelScene, this.voxelCamera);
-      this.sceneTarget.viewport.set(0, 0, layout.targetW, targetH);
-      this.sceneTarget.scissorTest = false;
-      renderer.setRenderTarget(this.sceneTarget);
-    }
-    renderer.render(this.over, this.camera);
+    this.composer.render(view.dt);
 
-    renderer.setRenderTarget(this.compositeTarget);
-    renderer.render(this.compositeScene, this.camera);
+    // Pixel UI last, straight to the screen, so it is never bloomed, graded or resampled.
     renderer.setRenderTarget(null);
-    renderer.render(this.blitScene, this.camera);
-  }
-
-  /** Reads the palette-locked low-res frame (RGBA, bottom row first) for tests. */
-  readFrame(): { width: number; height: number; data: Uint8Array } {
-    const { targetW, targetH } = this.layout;
-    const data = new Uint8Array(targetW * targetH * 4);
-    this.renderer.readRenderTargetPixels(this.compositeTarget, 0, 0, targetW, targetH, data);
-    return { width: targetW, height: targetH, data };
+    renderer.render(this.uiScene, this.identity);
   }
 
   dispose(): void {
     this.ripples.dispose();
-    this.sceneTarget.dispose();
-    this.compositeTarget.dispose();
+    this.composer.dispose();
     this.renderer.dispose();
   }
 
-  private makeTarget(depth: boolean): THREE.WebGLRenderTarget {
-    return new THREE.WebGLRenderTarget(this.layout.targetW, this.layout.targetH, {
-      magFilter: THREE.NearestFilter,
-      minFilter: THREE.NearestFilter,
-      depthBuffer: depth,
-      colorSpace: THREE.NoColorSpace,
-    });
+  private drawScene(renderer: THREE.WebGLRenderer, target: THREE.WebGLRenderTarget): void {
+    const cam = this.camera;
+    renderer.setRenderTarget(target);
+    renderer.clear();
+    renderer.render(this.world, this.identity);
+    // Under the surface: fish, then the water over them, then the land that hides both.
+    cam.layers.set(LAYER_RIVER);
+    renderer.render(this.actors, cam);
+    renderer.render(this.surface, this.identity);
+    renderer.clearDepth();
+    // Above it: the net and pole, the fisherman in front of the pole, then lantern, basket and caught fish.
+    if (this.netVisible) {
+      cam.layers.set(LAYER_NET);
+      renderer.render(this.actors, cam);
+    }
+    renderer.render(this.flat, this.identity);
+    renderer.clearDepth();
+    cam.layers.set(LAYER_BRIDGE);
+    renderer.render(this.actors, cam);
+    renderer.render(this.fx, this.identity);
+    cam.layers.enableAll();
   }
 
-  private quadMaterial(map: THREE.Texture, flat = false, ui = false): THREE.ShaderMaterial {
+  private quadMaterial(map: THREE.Texture, flat: boolean): THREE.ShaderMaterial {
     return new THREE.ShaderMaterial({
       vertexShader: GLSL.QUAD_VERT,
       fragmentShader: GLSL.QUAD_FRAG,
       defines: flat ? { FLAT: '' } : {},
       uniforms: {
-        uTarget: this.shared.uTarget!,
+        uTarget: this.uiTarget,
         uRect: { value: new THREE.Vector4(0, 0, 1, 1) },
         uMap: { value: map },
         uTint: { value: new THREE.Vector3() },
         uTintMix: { value: 0 },
-        // UI stays at full brightness when the scene dims behind a menu.
-        uDarken: ui ? { value: 0 } : this.shared.uDarken!,
       },
       side: THREE.DoubleSide,
       depthTest: false,
       depthWrite: false,
     });
-  }
-
-  /** Authored size whose height best matches the projected size. */
-  private sizeIndex(kind: FishKind, rel: number): number {
-    const rects = this.assets.fishRects[kind];
-    const near = rects[rects.length - 1] as AtlasRect;
-    const wanted = (near.height * rel * this.assets.gridW) / AUTHORED_GRID_W;
-    let best = 0;
-    let bestD = Infinity;
-    rects.forEach((r, i) => {
-      const d = Math.abs(r.height - wanted);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    });
-    return best;
-  }
-
-  private updateSprites(fish: readonly FishView[]): void {
-    const { iPos, iRect, iAnim, iLook } = this.fishAttrs;
-    const { originX, originY } = this.layout;
-    let n = 0;
-    for (const f of fish) {
-      if (n >= MAX_FISH) break;
-      const rect = this.assets.fishRects[f.kind][this.sizeIndex(f.kind, f.rel * (0.35 + 0.65 * f.scoop))] as AtlasRect;
-      iPos.setXY(n, Math.floor(originX + f.x - rect.width / 2), Math.floor(originY + f.y - rect.height * 0.6));
-      iRect.setXYZW(n, rect.x, rect.y, rect.width, rect.height);
-      const eel = f.kind === 'eel';
-      const amp = (rect.height >= 12 ? 1.3 : rect.height >= 8 ? 1 : 0.6) * (eel ? 1.3 : 1) * (f.scoop < 1 ? 1.8 : 1);
-      // Quantised phase: the swim cycle steps through eight poses instead of sliding.
-      const phase = (Math.floor((f.phase / (Math.PI * 2)) * 8) / 8) * Math.PI * 2;
-      iAnim.setXYZW(n, phase, amp, Math.max(-0.7, Math.min(0.7, f.slope)), eel ? 1 : 0);
-      const tint = (eel ? 0.1 : f.kind === 'koi' ? 0.14 : 0.04) * f.scoop;
-      iLook.setXYZW(n, tint, f.flash, f.scoop < 0.35 ? 0.5 : 1, 0);
-      n++;
-    }
-    this.fishGeometry.instanceCount = n;
-    for (const a of Object.values(this.fishAttrs)) a.needsUpdate = true;
-  }
-
-  private updateVoxels(fish: readonly FishView[]): void {
-    const matrix = new THREE.Matrix4();
-    const color = new THREE.Color();
-    const base = new THREE.Matrix4();
-    const local = new THREE.Vector3();
-    const v = this.voxelSize;
-    let n = 0;
-    for (const f of fish) {
-      const grid = FISH_SPRITES[f.kind][3];
-      if (!grid) continue;
-      const colors = FISH_COLORS[f.kind];
-      const shrink = 0.35 + 0.65 * f.scoop;
-      // World x maps to three x, world z (away from the camera) to three -z.
-      base.makeRotationY(f.heading).setPosition(f.worldX, -v * 0.6, -f.worldZ);
-      const eel = f.kind === 'eel';
-      for (let row = 0; row < grid.height; row++) {
-        const tail = eel ? 1 : 1 - row / (grid.height - 1);
-        const sway = Math.sin(f.phase + row * 0.8) * tail * (eel ? 1.4 : 1.1);
-        for (let col = 0; col < grid.width; col++) {
-          const index = grid.cells[row * grid.width + col] ?? 0;
-          if (index === 0 || n >= 6000) continue;
-          local.set((col - grid.width / 2 + sway) * v * shrink, 0, (row - grid.height * 0.6) * v * shrink).applyMatrix4(base);
-          matrix
-            .makeRotationY(f.heading)
-            .scale(new THREE.Vector3(v * shrink, v * 1.6 * shrink, v * shrink))
-            .setPosition(local);
-          this.voxels.setMatrixAt(n, matrix);
-          const [r, g, b] = hexToRgb(colors[index] ?? '#ff00ff');
-          color.setRGB(r / 255, g / 255, b / 255, THREE.LinearSRGBColorSpace);
-          if (f.flash > 0) color.lerp(new THREE.Color(1, 1, 1), f.flash);
-          this.voxels.setColorAt(n, color);
-          n++;
-        }
-      }
-    }
-    this.voxels.count = n;
-    this.voxels.instanceMatrix.needsUpdate = true;
-    if (this.voxels.instanceColor) this.voxels.instanceColor.needsUpdate = true;
   }
 }

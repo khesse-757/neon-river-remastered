@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PARTICLE_FRAG, PARTICLE_VERT } from './shaders';
 
-const MAX = 320;
+const MAX = 400;
 
 interface Particle {
   x: number;
@@ -10,19 +10,33 @@ interface Particle {
   vy: number;
   gravity: number;
   life: number;
-  /** Seconds between blinks; 0 = always lit. */
   blink: number;
   age: number;
-  color: THREE.Vector3;
+  color: THREE.Color;
   size: number;
+  /** HDR multiplier; above ~1 the particle blooms. */
+  glow: number;
 }
 
-/** Grid-snapped one-texel particles: droplets, sparks, fireflies. Positions are painting-grid. */
+export interface ParticleSpec {
+  x: number;
+  y: number;
+  vx?: number;
+  vy?: number;
+  gravity?: number;
+  life: number;
+  blink?: number;
+  color: THREE.Color;
+  size?: number;
+  glow?: number;
+}
+
+/** Pooled soft particles (droplets, sparks, drips, fireflies). Positions are painting texels. */
 export class Particles {
   readonly mesh: THREE.Mesh;
   private readonly live: Particle[] = [];
   private readonly points = new Float32Array(MAX * 3);
-  private readonly colors = new Float32Array(MAX * 3);
+  private readonly colors = new Float32Array(MAX * 4);
   private readonly geometry = new THREE.InstancedBufferGeometry();
   private readonly pointAttr: THREE.InstancedBufferAttribute;
   private readonly colorAttr: THREE.InstancedBufferAttribute;
@@ -31,7 +45,7 @@ export class Particles {
     this.geometry.index = quad.index;
     this.geometry.setAttribute('position', quad.getAttribute('position'));
     this.pointAttr = new THREE.InstancedBufferAttribute(this.points, 3);
-    this.colorAttr = new THREE.InstancedBufferAttribute(this.colors, 3);
+    this.colorAttr = new THREE.InstancedBufferAttribute(this.colors, 4);
     this.pointAttr.setUsage(THREE.DynamicDrawUsage);
     this.colorAttr.setUsage(THREE.DynamicDrawUsage);
     this.geometry.setAttribute('iPoint', this.pointAttr);
@@ -44,22 +58,16 @@ export class Particles {
       side: THREE.DoubleSide,
       depthTest: false,
       depthWrite: false,
+      transparent: true,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
     });
     this.mesh = new THREE.Mesh(this.geometry, material);
     this.mesh.frustumCulled = false;
   }
 
-  emit(p: {
-    x: number;
-    y: number;
-    vx?: number;
-    vy?: number;
-    gravity?: number;
-    life: number;
-    blink?: number;
-    color: THREE.Vector3;
-    size?: number;
-  }): void {
+  emit(p: ParticleSpec): void {
     if (this.live.length >= MAX) return;
     this.live.push({
       x: p.x,
@@ -72,6 +80,7 @@ export class Particles {
       age: 0,
       color: p.color,
       size: p.size ?? 1,
+      glow: p.glow ?? 1,
     });
   }
 
@@ -91,9 +100,11 @@ export class Particles {
       p.vy += p.gravity * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      if (p.blink > 0 && Math.floor(p.age / p.blink) % 3 === 2) continue;
+      const t = p.age / p.life;
+      // Fireflies breathe; everything else fades out over its last third.
+      const alpha = p.blink > 0 ? 0.25 + 0.75 * Math.max(0, Math.sin((p.age / p.blink) * Math.PI * 2)) ** 2 : Math.min(1, (1 - t) * 3);
       this.points.set([originX + p.x, originY + p.y, p.size], n * 3);
-      this.colors.set([p.color.x, p.color.y, p.color.z], n * 3);
+      this.colors.set([p.color.r * p.glow, p.color.g * p.glow, p.color.b * p.glow, alpha * Math.min(1, t * 8 + 0.3)], n * 4);
       n++;
     }
     this.geometry.instanceCount = n;

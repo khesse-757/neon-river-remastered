@@ -24,6 +24,8 @@ export interface PaintingCamera {
   readonly pitch: number;
   project(worldX: number, worldZ: number): Projected;
   unproject(screenX: number, screenY: number): { x: number; z: number };
+  /** World point where the view ray through a painting pixel meets the plane y = height. */
+  unprojectAtHeight(screenX: number, screenY: number, height: number): { x: number; y: number; z: number };
 }
 
 export function createCamera(spec: CameraSpec): PaintingCamera {
@@ -45,6 +47,15 @@ export function createCamera(spec: CameraSpec): PaintingCamera {
       const z = (h * (cos + t * sin)) / (sin - t * cos);
       const zc = h * sin + z * cos;
       return { x: ((screenX - spec.centerX) * zc) / spec.focal, z };
+    },
+    unprojectAtHeight(screenX, screenY, height) {
+      const xr = (screenX - spec.centerX) / spec.focal;
+      const yr = (spec.centerY - screenY) / spec.focal;
+      // Ray = right * xr + up * yr + forward, with forward (0, -sin, cos) and up (0, cos, sin).
+      const dy = yr * cos - sin;
+      const dz = yr * sin + cos;
+      const t = (height - h) / dy;
+      return { x: xr * t, y: height, z: dz * t };
     },
   };
 }

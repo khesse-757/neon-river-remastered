@@ -1,6 +1,7 @@
 import type { LossCause } from '../sim/sim';
 
 export type ButtonName = 'start' | 'resume' | 'retry' | 'pause' | 'mute';
+export type RangeName = 'music' | 'ambience' | 'sfx';
 
 export interface RunSummary {
   readonly cause: LossCause | null;
@@ -36,17 +37,26 @@ export class Overlay {
     pause: el('#btn-pause'),
     mute: el('#btn-mute'),
   };
+  private readonly ranges: Record<RangeName, HTMLInputElement> = {
+    music: el('#vol-music'),
+    ambience: el('#vol-ambience'),
+    sfx: el('#vol-sfx'),
+  };
   private readonly status = el<HTMLElement>('#status');
   private readonly probe = el<HTMLElement>('#safe-area');
   private texel = 2;
 
-  constructor(handlers: Record<ButtonName, () => void>) {
+  constructor(handlers: Record<ButtonName, () => void> & { volume: (key: RangeName, value: number) => void }) {
     for (const [name, button] of Object.entries(this.buttons) as [ButtonName, HTMLButtonElement][]) {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         handlers[name]();
       });
       button.hidden = true;
+    }
+    for (const [name, range] of Object.entries(this.ranges) as [RangeName, HTMLInputElement][]) {
+      range.addEventListener('input', () => handlers.volume(name, Number(range.value) / 100));
+      range.hidden = true;
     }
   }
 
@@ -62,15 +72,21 @@ export class Overlay {
   }
 
   /** Put a button over its drawn art (target texels), padded out to a 44 px touch target. */
-  place(name: ButtonName, rect: TexelRect | null): void {
-    const button = this.buttons[name];
+  setRange(name: RangeName, value: number): void {
+    this.ranges[name].value = String(Math.round(value * 100));
+  }
+
+  place(name: ButtonName | RangeName, rect: TexelRect | null): void {
+    const range = name in this.ranges;
+    const button: HTMLElement = range ? this.ranges[name as RangeName] : this.buttons[name as ButtonName];
     if (!rect) {
       if (!button.hidden) button.hidden = true;
       return;
     }
     // Pad in whole texels so the hit area and focus ring stay on the pixel grid.
     const t = this.texel;
-    const padX = Math.max(0, Math.ceil((MIN_TOUCH - rect.w * t) / 2 / t));
+    // A slider keeps its exact width so the thumb tracks the drawn knob.
+    const padX = range ? 0 : Math.max(0, Math.ceil((MIN_TOUCH - rect.w * t) / 2 / t));
     const padY = Math.max(0, Math.ceil((MIN_TOUCH - rect.h * t) / 2 / t));
     const x = Math.max(0, rect.x - padX) * t;
     const y = Math.max(0, rect.y - padY) * t;

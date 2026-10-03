@@ -92,7 +92,7 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 - `npm run build` — typecheck + production build; `postbuild` scans `dist/` for secrets
 - `npm run preview` — serve the build at http://127.0.0.1:4188
 - `npm run check` — lint + typecheck + unit tests + secret scan of tracked files
-- `npm run test` — Vitest sim suite (`tests/sim/`)
+- `npm run test` — Vitest suites (`tests/sim/`, `tests/audio/`)
 - `npm run test:e2e` — Playwright smoke on desktop + mobile projects (`tests/e2e/`), real input
 - `npm run build:scene` — regenerate palette, re-quantized painting, masks, fisherman from the v1 art
   (`scripts/build-scene.mjs` + `scripts/masks.json`); inspect `artifacts/scene-debug/` afterwards
@@ -103,5 +103,11 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 - Bot playtest: not built yet (Gate 2). `src/sim/bots/tracker.ts` is only a capture/smoke helper.
 
 Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
-`phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `loss-eel`, `loss-escaped`.
-Look-dev URL params: `?grid=192x344|216x387|256x459|384x688`, `?fish=voxel`, `?ripple=byte`, `?seed=N`.
+`phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `koi-scoop`, `eel-near`,
+`loss-eel`, `loss-escaped`.
+Look-dev URL params: `?actors=3x` (3D layer at 3 px per painting texel instead of device pixels),
+`?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`.
+
+- `node scripts/record.mjs --url http://127.0.0.1:4188 --out <dir>` — 9 s active-play videos on both
+  viewports plus fps / draw-call stats (run against `npm run preview` for performance numbers)
+- `node scripts/normalize-audio.mjs` — loudness-normalize `assets-src/audio/*` into `public/audio/` (needs ffmpeg)

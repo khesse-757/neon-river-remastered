@@ -88,3 +88,66 @@ counted as evidence was just a picture of normal play. All fixed; the two loss
 hooks now throw if they don't reach the state they claim. Still open: at the
 far bend the river is three pixels wide, so you cannot read which lane a fish
 is in until it is a quarter of the way down.
+
+## 2026-10-03 — Gate 1.5: the art pivot ("the painting, in 3D")
+
+Kyle's verdict on Gate 1: the infrastructure is good, the look is not. It was
+faithful but flat and low-res. I had followed the rule "every pixel on one
+grid" to the letter and delivered exactly that: a 216×387 picture with flat
+sprites on it. What he wanted was an _impression_ of the original with fish,
+river and net that read as 3D. The art-direction skill was rewritten (v2) and
+the renderer with it. The sim, input, tests and UI did not change at all, which
+is the argument for keeping the simulation pure.
+
+Media: `docs/media/gate-1.5/` — `v1-vs-gate1-vs-gate1.5.png`,
+`active-play-desktop.webm`, `active-play-mobile.webm`, `koi-scoop-*`,
+`eel-near-*`, `early-phase-*`, `rest-banner-*`,
+`sheet-actors-device-vs-3x-mobile.png`.
+
+### What changed
+
+- The painting stays pixel art, but everything you play with is now a toon-lit
+  3D object: procedural fish (300–500 triangles each, swimming with a spine wave
+  in the vertex shader), a net with a cloth bowl, a glowing hinge and a bamboo
+  pole, a swinging paper lantern that is a real point light, and a basket that
+  fills as you catch — the progress bar is now an object in the world.
+- The river is a real surface: Fresnel reflections that follow the mirrored
+  view ray out to the painted skyline, stepped moon glints, foam along a
+  distance field of the banks, and the painted river bed refracting underneath.
+- Fish sink into depth fog and rise smoothly toward the net. In Gate 1 they
+  popped from "tinted" to "plain sprite"; that was Kyle's first playtest note.
+- Bloom on neon, eels, lantern and the hinge; a palette grade at 18% strength
+  instead of the hard 48-color quantize.
+
+### Numbers
+
+- Gate 1: 18–37 draw calls, 0 triangles that mattered. Gate 1.5: ≤ 70 draw
+  calls, ≤ 5.4k triangles, 58–59 fps at phone resolution on a desktop GPU.
+- Whole renderer rewrite: about 2,000 lines replaced; 0 lines of `src/sim`.
+
+### Audio
+
+- The streak tune used to climb a scale and then sit on its top note. It is now
+  a composed 32-step melody (call and answer) with a 32-step variation, in the
+  key of the music, snapped to the music's eighth notes when a catch lands
+  within 40 ms of one.
+- I measured the generated music instead of trusting the prompt: 80 BPM and
+  D-centred as asked, but the file was 48.065 s and the loop point clicked
+  (the sample jump across the wrap was four times a normal step). Trimmed to
+  exactly 64 beats and added 20 ms fades.
+- The generated "D4" koto note is actually 307.8 Hz (between D and E-flat).
+  The melody repitches from the measured value, not the requested one.
+- The ambience came out of the generator at −33 LUFS; the splashes peaked at
+  −14 and −10 dBFS. Everything is now normalized offline by a script.
+
+### Surprises
+
+- The first v2 frame worked. The hard part had been done in Gate 1: the camera
+  fitted to the painting meant a real 3D net, placed in world units, landed on
+  the painted river at the right size on the first try.
+- A broad `pkill` to stop my dev server also killed the Playwright MCP server.
+  New rule: stop only the PIDs you started.
+
+### Still can't do
+
+- Hear any of it, or run it on a real phone. Frame rates are from a desktop GPU.

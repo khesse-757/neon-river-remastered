@@ -89,6 +89,31 @@ body {
   touch-action: manipulation;
 }
 
+#overlay input[type='range'] {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#overlay input[type='range']:focus-visible {
+  opacity: 1;
+  appearance: none;
+  background: transparent;
+  outline: var(--texel) solid #8ff8ff;
+}
+
+#overlay input[type='range']:focus-visible::-webkit-slider-thumb {
+  appearance: none;
+  width: 1px;
+  height: 1px;
+  background: transparent;
+}
+
+#overlay input[hidden],
 #overlay button[hidden] {
   display: none;
 }

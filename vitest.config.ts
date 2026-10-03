@@ -3,6 +3,6 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['tests/sim/**/*.test.ts'],
+    include: ['tests/sim/**/*.test.ts', 'tests/audio/**/*.test.ts'],
   },
 });

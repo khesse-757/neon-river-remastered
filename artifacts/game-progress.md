@@ -14,10 +14,32 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 
 ## Gate status
 - [x] Gate 0 — Design + tech plan approved (2026-10-02)
-- [ ] Gate 1 — Look-dev slice: built, awaiting Kyle's review (PR #1, branch `gate-1/look-dev`)
+- [x] Gate 1 — Look-dev slice: merged as the foundation (PR #1, 2026-10-03). Look NOT approved: too flat and low-res.
+- [ ] Gate 1.5 — Art direction v2 + audio fixes: built, awaiting Kyle's review (branch `gate-1.5/art-v2`)
 - [ ] Gate 2 — Full loop playable
 - [ ] Gate 3 — Polish + QA pass
 - [ ] Gate 4 — Release candidate
+
+## Gate 1.5 (art direction v2) — decisions
+- **Supersedes** the Gate 1 decisions about one 216×387 grid for everything, flat sprites, palette-lock composite, voxel A/B and ripple thresholds. The sim, input, in-canvas pixel UI, hooks and tooling carry over unchanged.
+- **Two layers:** the painting is still drawn crisp (nearest, integer multiple of the 216×387 pitch, lit per painted texel). Water surface, fish, net, lantern and basket are shaded per device pixel on top.
+- **One HDR frame, fixed draw order:** painting + refracted river bed → fish (3D, depth-fogged) → water surface (Fresnel skyline reflection, stepped moon glints, bank foam, ripple crests, eel/koi light) → land redrawn as an occluder → net and pole → fisherman → lantern, basket, caught fish → particles. Then bloom, then one final pass (vignette, palette grade at 0.18 strength, sRGB). Pixel UI is drawn after post, straight to the screen.
+- **Fish:** procedural toon-lit geometry (bluegill ≈ 330 tris, koi ≈ 420, eel ≈ 500), spine wave in the vertex shader, instanced per species. Depth, fog and brightness change together as a smoothstep of progress, so there is no pop; in the net they are lifted clear of the water and flop, then fly to the basket.
+- **True perspective sizes.** Fish are no longer oversized at the far bend; a wake line and the emitter light carry the read there (v2 rule).
+- **Net:** hoop, cloth bowl with a knotted pixel texture (sways, bulges, drips), cyber hinge whose teal ring brightens with the streak, lacquered bamboo pole to the fisherman's hands. Scoop-and-lift is 0.34 s and cosmetic; the sim's net never leaves the water.
+- **Basket = progress:** fills with landed weight / 200 lb.
+- **Lights:** hemisphere + moon directional + neon fill directional + lantern point light + up to 3 eel point lights (real three.js lights on MeshToonMaterial). The painting takes the lantern as a stepped per-texel pool; the fisherman is relit with normals derived from his own pixels in the shader.
+- **Parallax:** only the far layer (sky + skyline, flood-filled mask) slides, in whole texels, with the net and a slow drift. Sliding the bridge layer would detach it from the 3D props standing on it.
+- **Actor resolution A/B:** device pixels vs 3 px per texel (`?actors=3x`). Recommend device: at 3x the nearest upscale to a 5x phone gives uneven painting pixels and stair-stepped 3D edges.
+- **Audio:** 5 buses → master low-cut 80 Hz / −3.5 dB shelf at 8.5 kHz / +1.5 dB at 2.8 kHz → compressor → limiter. Music ducks under banners and the shock. Assets are normalized offline (`scripts/normalize-audio.mjs`): music −16 LUFS, ambience −24 LUFS, one-shots −3 dBFS peak.
+- **Streak melody:** composed 32-step call-and-answer in D hirajoshi plus a 32-step variation (64 steps before it repeats), onsets nudged ≤ 40 ms to the music's 8th-note grid, koi chord, layers at 8/16/32, falling resolution on a miss. Voice is a sampled koto pluck (measured at 307.8 Hz) repitched; Karplus-Strong fallback.
+- **Music loop:** measured 80 BPM, D-centred; trimmed to exactly 48 s (64 beats); 20 ms edge fades because the raw wrap jumped 4× a normal sample step.
+
+## Gate 1.5 measurements (2026-10-03, production preview, Apple GPU — not a phone)
+- 58–59 fps (vsync-bound) at 1440×900 and at 1170×2532; p95 frame 17.6 ms. `?actors=3x` measures the same here, so this machine cannot separate them.
+- Draw calls ≤ 70 (budget 100 mobile / 200 desktop). Triangles ≤ 5.4k. 2 post passes (bloom, final).
+- Textures 61 vs the inspector's mobile starting budget of 40: every UI label is its own tiny texture. Still to fix with a glyph atlas.
+- Payload before audio ≈ 860 kB (JS 626 kB / 168 kB gzip, default-grid scene, fonts). Audio 1.2 MB. Budget 4 MB.
 
 ## Decisions
 - **Grid:** default 216×387. The painting's own pixel pitch measures 3.56 px (FFT of edge positions), so 216×387 is the only candidate that does not resample painted pixels. Other three kept behind `?grid=` until Kyle picks.

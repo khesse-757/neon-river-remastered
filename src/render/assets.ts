@@ -1,29 +1,16 @@
 import * as THREE from 'three';
 import paletteHex from '../data/palette.json';
-import { FISH_COLORS, FISH_SPRITES, LANTERN, LANTERN_COLORS, type SpriteGrid } from '../data/sprites';
-import type { FishKind } from '../sim/config';
+import type { River } from '../sim/river';
 
 export type Rgb = readonly [number, number, number];
 
 export const hexToRgb = (hex: string): Rgb => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
 export const PALETTE: readonly Rgb[] = (paletteHex as string[]).map(hexToRgb);
 
-/** Nearest palette color, as 0..1 floats, for effects authored in code. */
-export function paletteColor(hex: string): THREE.Vector3 {
-  const [r, g, b] = hexToRgb(hex);
-  let best: Rgb = PALETTE[0] ?? [0, 0, 0];
-  let bestD = Infinity;
-  for (const p of PALETTE) {
-    const d = (p[0] - r) ** 2 + (p[1] - g) ** 2 + (p[2] - b) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = p;
-    }
-  }
-  return new THREE.Vector3(best[0] / 255, best[1] / 255, best[2] / 255);
-}
+/** A palette-family color in linear working space, for materials and lights. */
+export const color = (hex: string): THREE.Color => new THREE.Color(hex);
 
-export interface AtlasRect {
+export interface Rect {
   readonly x: number;
   readonly y: number;
   readonly width: number;
@@ -33,26 +20,28 @@ export interface AtlasRect {
 export interface SceneAssets {
   readonly gridW: number;
   readonly gridH: number;
+  /** The painting, sRGB, nearest. Row 0 is the top. */
   readonly bg: THREE.Texture;
-  readonly maskA: THREE.Texture;
-  readonly maskB: THREE.Texture;
-  /** 1 where a grid texel is water. */
-  readonly water: Uint8Array;
+  readonly maskA: THREE.Texture; // r water, g reeds, b canopy
+  readonly maskB: THREE.Texture; // r far layer (sky + skyline), g neon, b bridge
+  /** r: distance to the bank (0 at the edge, 1 deep), g/b: flow direction on screen. Linear filtered. */
+  readonly field: THREE.DataTexture;
+  /** Tiling smooth noise (two channels) for flow normals. */
+  readonly noise: THREE.DataTexture;
   readonly fisherman: THREE.Texture;
-  readonly fishermanRect: AtlasRect;
-  readonly atlas: THREE.DataTexture;
-  readonly fishRects: Readonly<Record<FishKind, readonly AtlasRect[]>>;
-  readonly lantern: THREE.DataTexture;
-  readonly paletteTexture: THREE.DataTexture;
+  readonly fishermanRect: Rect;
+  /** 32^3 grade LUT: each cell holds its nearest palette color (sRGB). */
   readonly lut: THREE.Data3DTexture;
+  /** Four-step toon ramp. */
+  readonly ramp: THREE.DataTexture;
 }
 
-function pixelTexture<T extends THREE.Texture>(texture: T): T {
+function pixelTexture<T extends THREE.Texture>(texture: T, srgb: boolean): T {
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
   texture.flipY = false;
-  texture.colorSpace = THREE.NoColorSpace;
+  texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   texture.needsUpdate = true;
   return texture;
 }
@@ -64,93 +53,144 @@ async function loadImage(url: string): Promise<HTMLImageElement> {
   return image;
 }
 
-function gridToRgba(grid: SpriteGrid, colors: readonly string[], glowOutline?: string): Uint8Array {
-  const data = new Uint8Array(grid.width * grid.height * 4);
-  for (let i = 0; i < grid.cells.length; i++) {
-    const index = grid.cells[i] ?? 0;
-    if (index === 0) continue;
-    const [r, g, b] = hexToRgb(colors[index] ?? '#ff00ff');
-    // Alpha 128 marks the outline, which fish under the surface trade for a soft shadow.
-    // The eel's outline instead glows: it is drawn in electric teal at full strength.
-    if (index === 1 && glowOutline) data.set([...hexToRgb(glowOutline), 255], i * 4);
-    else data.set([r, g, b, index === 1 ? 128 : 255], i * 4);
-  }
-  return data;
-}
-
-function buildFishAtlas(): { atlas: THREE.DataTexture; rects: Record<FishKind, AtlasRect[]> } {
-  const size = 128;
-  const data = new Uint8Array(size * size * 4);
-  const rects: Record<FishKind, AtlasRect[]> = { bluegill: [], koi: [], eel: [] };
-  let x = 0;
-  let y = 0;
-  let rowH = 0;
-  for (const kind of Object.keys(FISH_SPRITES) as FishKind[]) {
-    for (const grid of FISH_SPRITES[kind]) {
-      if (x + grid.width > size) {
-        x = 0;
-        y += rowH + 1;
-        rowH = 0;
-      }
-      const rgba = gridToRgba(grid, FISH_COLORS[kind], kind === 'eel' ? '#29bcc2' : undefined);
-      for (let row = 0; row < grid.height; row++)
-        data.set(rgba.subarray(row * grid.width * 4, (row + 1) * grid.width * 4), ((y + row) * size + x) * 4);
-      rects[kind].push({ x, y, width: grid.width, height: grid.height });
-      x += grid.width + 1;
-      rowH = Math.max(rowH, grid.height);
-    }
-  }
-  return { atlas: pixelTexture(new THREE.DataTexture(data, size, size, THREE.RGBAFormat)), rects };
-}
-
-function buildLut(): { lut: THREE.Data3DTexture; paletteTexture: THREE.DataTexture } {
-  const N = 64;
+function buildLut(): THREE.Data3DTexture {
+  const N = 32;
   const data = new Uint8Array(N * N * N * 4);
   for (let b = 0; b < N; b++)
     for (let g = 0; g < N; g++)
       for (let r = 0; r < N; r++) {
-        const cr = (r * 255) / (N - 1);
-        const cg = (g * 255) / (N - 1);
-        const cb = (b * 255) / (N - 1);
-        let i1 = 0;
-        let i2 = 0;
-        let d1 = Infinity;
-        let d2 = Infinity;
-        for (let i = 0; i < PALETTE.length; i++) {
-          const p = PALETTE[i] as Rgb;
-          const d = (p[0] - cr) ** 2 + (p[1] - cg) ** 2 + (p[2] - cb) ** 2;
-          if (d < d1) {
-            d2 = d1;
-            i2 = i1;
-            d1 = d;
-            i1 = i;
-          } else if (d < d2) {
-            d2 = d;
-            i2 = i;
+        const c = [(r * 255) / (N - 1), (g * 255) / (N - 1), (b * 255) / (N - 1)];
+        let best: Rgb = PALETTE[0] as Rgb;
+        let bestD = Infinity;
+        for (const p of PALETTE) {
+          const d = (p[0] - (c[0] ?? 0)) ** 2 + (p[1] - (c[1] ?? 0)) ** 2 + (p[2] - (c[2] ?? 0)) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = p;
           }
         }
-        data.set([i1, i2, 0, 255], (b * N * N + g * N + r) * 4);
+        data.set([best[0], best[1], best[2], 255], (b * N * N + g * N + r) * 4);
       }
   const lut = new THREE.Data3DTexture(data, N, N, N);
   lut.format = THREE.RGBAFormat;
-  lut.magFilter = THREE.NearestFilter;
-  lut.minFilter = THREE.NearestFilter;
+  lut.magFilter = THREE.LinearFilter;
+  lut.minFilter = THREE.LinearFilter;
   lut.unpackAlignment = 1;
   lut.needsUpdate = true;
-
-  const pal = new Uint8Array(PALETTE.length * 4);
-  PALETTE.forEach((p, i) => pal.set([p[0], p[1], p[2], 255], i * 4));
-  return { lut, paletteTexture: pixelTexture(new THREE.DataTexture(pal, PALETTE.length, 1, THREE.RGBAFormat)) };
+  return lut;
 }
 
-export async function loadSceneAssets(gridW: number, gridH: number): Promise<SceneAssets> {
+function buildNoise(): THREE.DataTexture {
+  const size = 128;
+  const cells = 16;
+  // Deterministic lattice noise that tiles; two decorrelated channels.
+  const lattice = (seed: number): Float32Array => {
+    const values = new Float32Array(cells * cells);
+    let s = seed;
+    for (let i = 0; i < values.length; i++) {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      values[i] = s / 4294967296;
+    }
+    return values;
+  };
+  const sample = (values: Float32Array, x: number, y: number): number => {
+    const fx = (x / size) * cells;
+    const fy = (y / size) * cells;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    const sx = tx * tx * (3 - 2 * tx);
+    const sy = ty * ty * (3 - 2 * ty);
+    const at = (ix: number, iy: number): number => values[(iy % cells) * cells + (ix % cells)] ?? 0;
+    const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * sx;
+    const b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * sx;
+    return a + (b - a) * sy;
+  };
+  const a = lattice(757);
+  const b = lattice(4242);
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) data.set([sample(a, x, y) * 255, sample(b, x, y) * 255, 0, 255], (y * size + x) * 4);
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** Bank distance and on-screen flow direction for every water texel of the painting. */
+function buildField(water: Uint8Array, gridW: number, gridH: number, river: River): THREE.DataTexture {
+  const MAX = 14;
+  const dist = new Float32Array(gridW * gridH).fill(MAX);
+  // Two-pass chamfer distance to the nearest non-water texel.
+  const at = (x: number, y: number): number => (x < 0 || y < 0 || x >= gridW || y >= gridH ? 0 : (dist[y * gridW + x] ?? 0));
+  for (let i = 0; i < dist.length; i++) if (!water[i]) dist[i] = 0;
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++) {
+      const i = y * gridW + x;
+      dist[i] = Math.min(dist[i] ?? 0, at(x - 1, y) + 1, at(x, y - 1) + 1, at(x - 1, y - 1) + 1.4, at(x + 1, y - 1) + 1.4);
+    }
+  for (let y = gridH - 1; y >= 0; y--)
+    for (let x = gridW - 1; x >= 0; x--) {
+      const i = y * gridW + x;
+      dist[i] = Math.min(dist[i] ?? 0, at(x + 1, y) + 1, at(x, y + 1) + 1, at(x + 1, y + 1) + 1.4, at(x - 1, y + 1) + 1.4);
+    }
+
+  const k = gridW / 768;
+  const samples: { x: number; y: number; tx: number; ty: number }[] = [];
+  for (let i = 0; i <= 300; i++) {
+    const s = (i / 300) * river.maxS;
+    const p = river.screenAt(s, 0.5);
+    const t = river.screenTangent(s, 0.5);
+    samples.push({ x: p.x * k, y: p.y * k, tx: t.x, ty: t.y });
+  }
+  const data = new Uint8Array(gridW * gridH * 4);
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++) {
+      const i = y * gridW + x;
+      let tx = 0;
+      let ty = 1;
+      if (water[i]) {
+        let best = Infinity;
+        for (const p of samples) {
+          const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+          if (d < best) {
+            best = d;
+            tx = p.tx;
+            ty = p.ty;
+          }
+        }
+      }
+      data.set([Math.min(255, ((dist[i] ?? 0) / MAX) * 255), tx * 127 + 128, ty * 127 + 128, 255], i * 4);
+    }
+  const texture = new THREE.DataTexture(data, gridW, gridH, THREE.RGBAFormat);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function buildRamp(): THREE.DataTexture {
+  const data = new Uint8Array([70, 70, 70, 255, 130, 130, 130, 255, 200, 200, 200, 255, 255, 255, 255, 255]);
+  const ramp = new THREE.DataTexture(data, 4, 1, THREE.RGBAFormat);
+  ramp.magFilter = THREE.NearestFilter;
+  ramp.minFilter = THREE.NearestFilter;
+  ramp.needsUpdate = true;
+  return ramp;
+}
+
+export async function loadSceneAssets(gridW: number, gridH: number, river: River): Promise<SceneAssets> {
   const base = `${import.meta.env.BASE_URL}assets/scene/${gridW}x${gridH}/`;
   const [bg, maskA, maskB, fisherman, meta] = await Promise.all([
     loadImage(`${base}bg.png`),
     loadImage(`${base}masks-a.png`),
     loadImage(`${base}masks-b.png`),
     loadImage(`${base}fisherman.png`),
-    fetch(`${base}meta.json`).then((r) => r.json() as Promise<{ fisherman: AtlasRect }>),
+    fetch(`${base}meta.json`).then((r) => r.json() as Promise<{ fisherman: Rect }>),
   ]);
 
   const canvas = document.createElement('canvas');
@@ -163,21 +203,43 @@ export async function loadSceneAssets(gridW: number, gridH: number): Promise<Sce
   const water = new Uint8Array(gridW * gridH);
   for (let i = 0; i < water.length; i++) water[i] = (pixels[i * 4] ?? 0) > 127 ? 1 : 0;
 
-  const { atlas, rects } = buildFishAtlas();
-  const { lut, paletteTexture } = buildLut();
   return {
     gridW,
     gridH,
-    bg: pixelTexture(new THREE.Texture(bg)),
-    maskA: pixelTexture(new THREE.Texture(maskA)),
-    maskB: pixelTexture(new THREE.Texture(maskB)),
-    water,
-    fisherman: pixelTexture(new THREE.Texture(fisherman)),
+    bg: pixelTexture(new THREE.Texture(bg), true),
+    maskA: pixelTexture(new THREE.Texture(maskA), false),
+    maskB: pixelTexture(new THREE.Texture(maskB), false),
+    field: buildField(water, gridW, gridH, river),
+    noise: buildNoise(),
+    fisherman: pixelTexture(new THREE.Texture(fisherman), true),
     fishermanRect: meta.fisherman,
-    atlas,
-    fishRects: rects,
-    lantern: pixelTexture(new THREE.DataTexture(gridToRgba(LANTERN, LANTERN_COLORS), LANTERN.width, LANTERN.height, THREE.RGBAFormat)),
-    paletteTexture,
-    lut,
+    lut: buildLut(),
+    ramp: buildRamp(),
   };
+}
+
+/** Small pixel-art texture drawn with canvas calls, nearest filtered, for 3D props. */
+export function pixelArt(
+  width: number,
+  height: number,
+  draw: (ctx: CanvasRenderingContext2D) => void,
+  repeat = false,
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D context unavailable.');
+  ctx.imageSmoothingEnabled = false;
+  draw(ctx);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  if (repeat) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+  }
+  return texture;
 }

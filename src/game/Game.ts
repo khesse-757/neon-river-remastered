@@ -2,11 +2,13 @@ import { AudioBus } from '../audio/AudioBus';
 import { Loop } from '../core/Loop';
 import { RIVER } from '../data/river';
 import { Input } from '../input/Input';
-import { loadSceneAssets, paletteColor } from '../render/assets';
+import * as THREE from 'three';
+import { color, loadSceneAssets } from '../render/assets';
+import type { FishInstance } from '../render/models/fish';
 import { PIXEL_FONT, TITLE_FONT } from '../render/PixelText';
-import { SceneRenderer, type FishStyle, type FishView, type FrameView, type LightView } from '../render/SceneRenderer';
+import { SceneRenderer, type ActorResolution, type FrameView, type WaterLight } from '../render/SceneRenderer';
 import { trackerIntent } from '../sim/bots/tracker';
-import { DEFAULT_CONFIG, PHASES, type SimConfig } from '../sim/config';
+import { DEFAULT_CONFIG, PHASES, type FishKind, type SimConfig } from '../sim/config';
 import type { NetIntent } from '../sim/net';
 import { River, type RiverData } from '../sim/river';
 import { createRng, type Rng } from '../sim/rng';
@@ -24,15 +26,28 @@ const GRIDS: readonly (readonly [number, number])[] = [
 ];
 const DEFAULT_GRID: readonly [number, number] = [216, 387];
 
+const VOLUME_KEYS = ['music', 'ambience', 'sfx'] as const;
+const SCOOP_TIME = 0.34;
+const TOSS_TIME = 0.5;
+
 const C = {
-  eel: paletteColor('#29bbc2'),
-  eelHot: paletteColor('#8ff8ff'),
-  koi: paletteColor('#ffb347'),
-  shimmer: paletteColor('#3b6d92'),
-  white: paletteColor('#ffffff'),
-  droplet: paletteColor('#9ccbcf'),
-  firefly: paletteColor('#ffd98a'),
+  eel: color('#39e6ee'),
+  eelHot: color('#8ff8ff'),
+  koi: color('#ffb347'),
+  shimmer: color('#5f93b8'),
+  white: color('#ffffff'),
+  droplet: color('#9ccbcf'),
+  firefly: color('#ffd98a'),
 };
+
+/** A caught fish between the net and the basket. */
+interface Carried {
+  kind: FishKind;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+}
 
 interface Pop {
   text: string;
@@ -44,7 +59,8 @@ interface Pop {
 
 export interface GameOptions {
   readonly grid?: string | null;
-  readonly fish?: string | null;
+  /** '3x' renders the 3D layer at three pixels per painting texel instead of device pixels. */
+  readonly actors?: string | null;
   readonly forceByteRipples?: boolean;
   readonly seed?: number;
 }
@@ -79,7 +95,12 @@ export class Game {
   private lossCause: LossCause | null = null;
   private lossTimer = 0;
   private shock = 0;
-  private netKick = 0;
+  private scoop = 0;
+  private bulge = 0;
+  private drip = 0;
+  private basketWeight = 0;
+  private readonly held = new Map<number, Carried>();
+  private readonly tosses: (Carried & { age: number })[] = [];
   private banner = 0;
   private bannerText = '';
   private telegraph: { lane: number; age: number } | null = null;
@@ -106,7 +127,9 @@ export class Game {
         this.audio.setMuted(!this.audio.isMuted);
         this.overlay.setMuted(this.audio.isMuted);
       },
+      volume: (key, value) => this.audio.setVolume(key, value),
     });
+    for (const key of VOLUME_KEYS) this.overlay.setRange(key, this.audio.getVolume(key));
     this.overlay.setMuted(this.audio.isMuted);
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config });
     this.installTestHooks();
@@ -120,7 +143,7 @@ export class Game {
   dispose(): void {
     this.loop.stop();
     this.input?.dispose();
-    this.audio.stopAmbience();
+    this.audio.stopLoops();
     this.view?.dispose();
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
     window.__THREE_GAME_TEST_HOOKS__ = undefined;
@@ -132,10 +155,6 @@ export class Game {
     this.startRun();
   }
 
-  setFishStyle(style: FishStyle): void {
-    this.view.fishStyle = style;
-  }
-
   togglePause(): void {
     if (this.mode === 'playing') this.setMode('paused');
     else if (this.mode === 'paused') this.setMode('playing');
@@ -143,18 +162,21 @@ export class Game {
 
   private async load(gridW: number, gridH: number): Promise<void> {
     const [assets] = await Promise.all([
-      loadSceneAssets(gridW, gridH),
+      loadSceneAssets(gridW, gridH, this.river),
       document.fonts.load(`8px ${PIXEL_FONT}`),
       document.fonts.load(`16px ${TITLE_FONT}`),
     ]);
-    this.view = new SceneRenderer(this.canvas, assets, this.river, { forceByteRipples: this.options.forceByteRipples });
-    if (this.options.fish === 'voxel') this.view.fishStyle = 'voxel';
+    this.view = new SceneRenderer(this.canvas, assets, this.river, {
+      forceByteRipples: this.options.forceByteRipples,
+      actors: (this.options.actors === '3x' ? '3x' : 'device') as ActorResolution,
+      netRadius: this.config.net.radius * this.river.railWidth,
+    });
     this.input = new Input(this.canvas, {
       rail: () => this.railCss(),
       onPause: () => this.togglePause(),
       onConfirm: () => this.confirm(),
       onFirstGesture: () => {
-        void this.audio.unlock().then(() => this.audio.startAmbience());
+        void this.audio.unlock().then(() => this.audio.startLoops());
       },
     });
     document.addEventListener('visibilitychange', () => {
@@ -169,7 +191,7 @@ export class Game {
   }
 
   private confirm(): void {
-    void this.audio.unlock().then(() => this.audio.startAmbience());
+    void this.audio.unlock().then(() => this.audio.startLoops());
     if (this.mode === 'title' || this.mode === 'over') this.startRun();
     else if (this.mode === 'paused') this.setMode('playing');
   }
@@ -185,7 +207,12 @@ export class Game {
     this.lossCause = null;
     this.lossTimer = 0;
     this.shock = 0;
-    this.netKick = 0;
+    this.scoop = 0;
+    this.bulge = 0;
+    this.drip = 0;
+    this.basketWeight = 0;
+    this.held.clear();
+    this.tosses.length = 0;
     this.telegraph = null;
     this.pops.length = 0;
     this.wake.clear();
@@ -260,6 +287,7 @@ export class Game {
       case 'restStart':
         this.bannerText = event.next.name.toUpperCase();
         this.banner = this.config.restSeconds;
+        this.audio.banner();
         break;
       case 'phaseStart':
         this.banner = Math.min(this.banner, 0.4);
@@ -276,17 +304,21 @@ export class Game {
         const p = this.fishPoint(event.fish);
         const koi = event.fish.kind === 'koi';
         this.audio.catch(event.streak, koi);
-        this.netKick = 0.12;
+        this.scoop = 0.0001;
+        this.bulge = 1;
+        this.drip = 0.9;
         ripples.inject(p.x, p.y, koi ? 5 : 4, koi ? 0.9 : 0.7);
-        for (let i = 0; i < (koi ? 12 : 7); i++) {
+        for (let i = 0; i < (koi ? 14 : 9); i++) {
           particles.emit({
-            x: p.x + (this.fx.next() - 0.5) * 6,
+            x: p.x + (this.fx.next() - 0.5) * 7,
             y: p.y - 1,
-            vx: (this.fx.next() - 0.5) * 30,
-            vy: -18 - this.fx.next() * 26,
-            gravity: 110,
-            life: 0.35 + this.fx.next() * 0.25,
-            color: this.fx.next() > 0.5 ? C.droplet : C.white,
+            vx: (this.fx.next() - 0.5) * 34,
+            vy: -20 - this.fx.next() * 30,
+            gravity: 120,
+            life: 0.4 + this.fx.next() * 0.25,
+            color: C.droplet,
+            size: 0.9 + this.fx.next() * 0.9,
+            glow: 0.9,
           });
         }
         this.pops.push({ text: `+${event.weight}`, age: 0, fromX: p.x, fromY: p.y - 8, color: koi ? '#ffcc66' : '#c7e1e8' });
@@ -297,33 +329,35 @@ export class Game {
         const p = this.fishPoint(event.fish);
         this.audio.miss();
         ripples.inject(p.x, p.y, 3, 0.5);
-        for (let i = 0; i < 3; i++)
+        for (let i = 0; i < 4; i++)
           particles.emit({
             x: p.x,
             y: p.y,
-            vx: (this.fx.next() - 0.5) * 16,
-            vy: -12 - this.fx.next() * 10,
-            gravity: 90,
+            vx: (this.fx.next() - 0.5) * 18,
+            vy: -12 - this.fx.next() * 12,
+            gravity: 100,
             life: 0.3,
             color: C.droplet,
+            glow: 0.7,
           });
         break;
       }
       case 'eelNear': {
         const p = this.fishPoint(event.fish);
         this.audio.crackle(0.25, 0.3);
-        this.sparks(p.x, p.y, 8);
+        this.sparks(p.x, p.y, 10);
         break;
       }
       case 'eelCaught': {
         this.audio.zap();
         this.hitstop = 0.12;
         this.shock = 0.0001;
-        const net = this.gridPoint(1, this.sim.state.net.lane);
         // Lightning runs up the pole to the fisherman's hands.
-        for (let i = 0; i <= 14; i++) {
-          const f = i / 14;
-          this.sparks(net.x + (this.view.grip.x - net.x) * f, net.y + (this.view.grip.y - net.y) * f, 2, 0.5);
+        const net = this.gridPoint(1, this.sim.state.net.lane);
+        const grip = this.view.toTexel(this.view.grip);
+        for (let i = 0; i <= 16; i++) {
+          const f = i / 16;
+          this.sparks(net.x + (grip.x - net.x) * f, net.y + (grip.y - net.y) * f, 2, 0.5);
         }
         if (navigator.vibrate && !this.reducedMotion) navigator.vibrate([40, 30, 80]);
         break;
@@ -344,24 +378,61 @@ export class Game {
       this.view.particles.emit({
         x: x + (this.fx.next() - 0.5) * 8,
         y: y + (this.fx.next() - 0.5) * 6,
-        vx: (this.fx.next() - 0.5) * 50,
-        vy: (this.fx.next() - 0.5) * 50,
+        vx: (this.fx.next() - 0.5) * 60,
+        vy: (this.fx.next() - 0.5) * 60,
         life: life * (0.5 + this.fx.next()),
         color: this.fx.next() > 0.5 ? C.eelHot : C.white,
+        size: 0.8 + this.fx.next() * 0.8,
+        glow: 3,
       });
     }
   }
 
-  /** Render-side effects driven by time: wakes, sparks, fireflies, end-of-run sequences. */
+  /** Render-side effects driven by time: wakes, sparks, fireflies, the scoop, end-of-run sequences. */
   private updateEffects(dt: number): void {
     if (dt <= 0) return;
     const { particles, ripples } = this.view;
     const state = this.sim.state;
-    this.netKick = Math.max(0, this.netKick - dt);
     this.banner = Math.max(0, this.banner - dt);
     if (this.telegraph) this.telegraph.age += dt;
     for (const pop of this.pops) pop.age += dt;
     while (this.pops[0] && this.pops[0].age > 0.7) this.pops.shift();
+
+    // Scoop: the hoop lifts and tips, the cloth swells, then both settle.
+    if (this.scoop > 0) {
+      this.scoop += dt;
+      if (this.scoop > SCOOP_TIME) this.scoop = 0;
+    }
+    this.bulge = Math.max(0, this.bulge - dt * 2.2);
+    if (this.drip > 0) {
+      this.drip -= dt;
+      if (this.fx.next() < dt * 26) {
+        const net = this.gridPoint(1, state.net.lane);
+        particles.emit({
+          x: net.x + (this.fx.next() - 0.5) * 12,
+          y: net.y - 2 - this.scoopLift() * 6,
+          vy: 10,
+          gravity: 90,
+          life: 0.35,
+          color: C.droplet,
+          size: 0.8,
+          glow: 0.8,
+        });
+      }
+    }
+
+    // Caught fish leave the net for the basket; the basket only fills when they land.
+    const live = new Set(state.fish.map((f) => f.id));
+    for (const [id, held] of this.held) {
+      if (live.has(id)) continue;
+      this.held.delete(id);
+      this.tosses.push({ ...held, age: 0 });
+    }
+    for (const toss of this.tosses) toss.age += dt;
+    while (this.tosses[0] && this.tosses[0].age >= TOSS_TIME) {
+      const landed = this.tosses.shift();
+      if (landed) this.basketWeight += this.config.weights[landed.kind];
+    }
 
     if (this.shock > 0) this.shock += dt;
     if (this.lossTimer > 0 && this.mode === 'playing' && state.status !== 'playing') {
@@ -369,30 +440,40 @@ export class Game {
       if (this.lossTimer <= 0) this.setMode('over');
     }
 
+    const railScale = this.river.screenAt(1, 0.5).scale;
     for (const fish of state.fish) {
       const p = this.fishPoint(fish);
-      const rel = p.scale / this.river.screenAt(1, 0.5).scale;
+      const rel = p.scale / railScale;
       const last = this.wake.get(fish.id) ?? 0;
-      if (fish.status === 'swimming' && this.time - last > 0.14 && rel > 0.2) {
+      // A faint wake line carries the read at the far bend, where the fish itself is tiny.
+      if (fish.status === 'swimming' && this.time - last > 0.12) {
         this.wake.set(fish.id, this.time);
-        ripples.inject(p.x, p.y - 3 * rel, 1 + 1.5 * rel, 0.08 + 0.1 * rel);
+        ripples.inject(p.x, p.y - 2 * rel, 0.9 + 1.6 * rel, 0.07 + 0.1 * rel);
       }
-      if (fish.kind === 'eel' && fish.status === 'swimming' && rel > 0.22 && this.fx.next() < dt * (fish.firstEel ? 22 : 12)) {
+      if (fish.kind === 'eel' && fish.status === 'swimming' && rel > 0.2 && this.fx.next() < dt * (fish.firstEel ? 26 : 14)) {
+        // Arcs crawl along the body.
         particles.emit({
-          x: p.x + (this.fx.next() - 0.5) * 10 * rel,
-          y: p.y + (this.fx.next() - 0.6) * 22 * rel,
-          life: 0.1 + this.fx.next() * 0.1,
+          x: p.x + (this.fx.next() - 0.5) * 12 * rel,
+          y: p.y + (this.fx.next() - 0.6) * 26 * rel,
+          vx: (this.fx.next() - 0.5) * 30,
+          vy: (this.fx.next() - 0.5) * 30,
+          life: 0.08 + this.fx.next() * 0.1,
           color: this.fx.next() > 0.4 ? C.eelHot : C.white,
+          size: 0.6 + rel,
+          glow: 2.6,
         });
+      }
+      if (fish.kind === 'koi' && fish.status === 'swimming' && rel > 0.3 && this.fx.next() < dt * 1.6) {
+        particles.emit({ x: p.x + (this.fx.next() - 0.5) * 6, y: p.y - 3 * rel, life: 0.35, color: C.koi, size: 1.2, glow: 1.6 });
       }
     }
     if (state.fish.length === 0) this.wake.clear();
-    if (Math.abs(state.net.velocity) > 0.5 && this.mode === 'playing' && this.fx.next() < dt * 14) {
+    if (Math.abs(state.net.velocity) > 0.5 && this.mode === 'playing' && this.fx.next() < dt * 16) {
       const net = this.gridPoint(1, state.net.lane);
-      ripples.inject(net.x, net.y, 3, 0.14);
+      ripples.inject(net.x, net.y, 3, 0.16);
     }
 
-    // Fireflies over the banks; calm nights have more of them.
+    // Fireflies over the banks.
     this.fireflyTimer -= dt;
     if (this.fireflyTimer <= 0) {
       this.fireflyTimer = 0.5 + this.fx.next() * 0.6;
@@ -405,94 +486,169 @@ export class Game {
         vx: (this.fx.next() - 0.5) * 4,
         vy: -1 - this.fx.next() * 3,
         life: 4 + this.fx.next() * 4,
-        blink: 0.5 + this.fx.next() * 0.5,
+        blink: 1.2 + this.fx.next() * 1.2,
         color: C.firefly,
+        size: 1.5,
+        glow: 2.2,
       });
     }
   }
 
+  private scoopLift(): number {
+    return this.scoop > 0 ? Math.sin((this.scoop / SCOOP_TIME) * Math.PI) : 0;
+  }
+
   private buildView(dt: number): FrameView {
     const state = this.sim.state;
+    const river = this.river;
     const alpha = this.mode === 'playing' && this.hitstop <= 0 ? this.accumulator / STEP : 1;
-    const railScale = this.river.screenAt(1, 0.5).scale;
-    const gs = this.view.assets.gridW / 216;
-    const lights: LightView[] = [];
-    const fish: FishView[] = [];
+    const railScale = river.screenAt(1, 0.5).scale;
+    const waterLights: WaterLight[] = [];
+    const eelLights: { x: number; z: number; intensity: number }[] = [];
+    const fish: FishInstance[] = [];
+    const airFish: FishInstance[] = [];
+
+    const netLane = state.net.prevLane + (state.net.lane - state.net.prevLane) * alpha;
+    const netWorld = river.pointAt(1, netLane);
+    const lift = this.scoopLift();
+    const netRadius = this.config.net.radius * river.railWidth;
 
     const ordered = [...state.fish].sort((a, b) => a.progress - b.progress);
     for (const f of ordered) {
       const p = this.fishPoint(f, alpha);
-      const rel = p.scale / railScale;
-      const tangent = this.river.screenTangent(p.s, p.lane);
-      const a = this.river.pointAt(p.s, p.lane);
-      const b = this.river.pointAt(Math.min(this.river.maxS, p.s + 0.004), p.lane);
-      const rate = f.kind === 'bluegill' ? 9 : f.kind === 'koi' ? 7 : 6;
+      const a = river.pointAt(p.s, p.lane);
+      const b = river.pointAt(Math.min(river.maxS, p.s + 0.004), p.lane);
+      const heading = Math.atan2(b.x - a.x, a.z - b.z);
+      const rate = f.kind === 'bluegill' ? 11 : f.kind === 'koi' ? 8 : 7;
+      const phase = this.time * rate + f.id * 1.7;
+      const u = f.prevProgress + (f.progress - f.prevProgress) * alpha;
+      // A fish rises steadily as it nears the net: depth, fog and brightness all change together.
+      const rise = THREE.MathUtils.smoothstep(u, 0.35, 0.98);
+      const eel = f.kind === 'eel';
+
+      if (f.status === 'scooped') {
+        // In the net: lifted clear of the water, flopping in the mesh.
+        const k = 1 - f.scoop;
+        this.held.set(f.id, { kind: f.kind, x: netWorld.x, y: netRadius * (0.2 + lift * 1.0), z: -netWorld.z, heading });
+        airFish.push({
+          kind: f.kind,
+          x: a.x + (netWorld.x - a.x) * Math.min(1, k * 2.5),
+          y: -0.01 + (netRadius * (0.2 + lift * 1.0) + 0.01) * Math.min(1, k * 2),
+          z: -(a.z + (netWorld.z - a.z) * Math.min(1, k * 2.5)),
+          heading: heading + Math.sin(this.time * 30 + f.id) * 0.7,
+          pitch: Math.sin(this.time * 24 + f.id) * 0.4,
+          scale: 0.95,
+          phase: phase * 2.4,
+          fog: 0,
+          glow: eel ? 2 : 0.5,
+          flash: Math.max(0, 0.5 - k * 2),
+          flop: 1.6,
+        });
+        continue;
+      }
+
+      const pulse = eel ? 0.75 + 0.25 * Math.sin(this.time * (f.firstEel ? 11 : 7) + f.id) : 0.5 + 0.5 * Math.sin(this.time * 3 + f.id);
       fish.push({
         kind: f.kind,
-        x: p.x,
-        y: p.y,
-        rel,
-        slope: tangent.y > 0.25 ? tangent.x / tangent.y : Math.sign(tangent.x) * 0.7,
-        phase: this.time * rate * (f.status === 'scooped' ? 2.2 : 1) + f.id * 1.7,
-        scoop: f.scoop,
-        flash: f.status === 'scooped' ? (f.scoop > 0.7 ? 0.8 : 0) : 0,
-        worldX: a.x,
-        worldZ: a.z,
-        heading: Math.atan2(b.x - a.x, a.z - b.z),
+        x: a.x,
+        y: -(0.05 - 0.04 * rise),
+        z: -a.z,
+        heading,
+        pitch: 0,
+        scale: 1.18,
+        phase,
+        fog: (eel ? 0.42 : 0.5) * (1 - rise) + 0.1,
+        glow: eel ? 0.7 + 0.5 * pulse : f.kind === 'koi' ? 0.35 * pulse * rise : 0,
+        flash: 0,
+        flop: 0,
       });
       if (f.status !== 'swimming') continue;
-      if (f.kind === 'eel') {
-        const pulse = f.firstEel ? 0.75 + 0.25 * Math.sin(this.time * 9) : 0.55;
-        lights.push({ x: p.x, y: p.y, radius: (5 + 12 * rel) * gs * (f.firstEel ? 1.5 : 1), intensity: pulse, color: C.eel });
+      const rel = p.scale / railScale;
+      if (eel) {
+        waterLights.push({
+          x: a.x,
+          z: a.z,
+          radius: 0.07 + 0.05 * (f.firstEel ? 1.5 : 1),
+          intensity: (0.5 + 0.35 * pulse) * (0.5 + 0.5 * rel),
+          color: C.eel,
+        });
+        if (u > 0.6) eelLights.push({ x: a.x, z: a.z, intensity: 0.5 + 0.5 * pulse });
       } else if (f.kind === 'koi') {
-        lights.push({ x: p.x, y: p.y, radius: (3 + 7 * rel) * gs, intensity: 0.3, color: C.koi });
+        waterLights.push({ x: a.x, z: a.z, radius: 0.06, intensity: 0.16 * rise, color: C.koi });
       }
     }
-    // Nearest lights win the eight slots.
-    lights.reverse();
-    lights.length = Math.min(lights.length, 6);
+    // Nearest lights win the slots.
+    waterLights.reverse();
+    waterLights.length = Math.min(waterLights.length, 4);
+    eelLights.reverse();
+
+    // Fish in flight from the net to the basket.
+    for (const toss of this.tosses) {
+      const t = Math.min(1, toss.age / TOSS_TIME);
+      const to = this.view.basket.mouth;
+      airFish.push({
+        kind: toss.kind,
+        x: toss.x + (to.x - toss.x) * t,
+        y: toss.y + (to.y - toss.y) * t + Math.sin(t * Math.PI) * 0.12,
+        z: toss.z + (to.z - toss.z) * t,
+        heading: toss.heading + t * 7,
+        pitch: t * 5,
+        scale: 0.9 - t * 0.25,
+        phase: this.time * 30,
+        fog: 0,
+        glow: 0.4,
+        flash: 0,
+        flop: 1.2,
+      });
+    }
 
     // The emitter's lane shimmers at the far bend; an incoming eel glows cold blue there.
     if (this.mode === 'playing' && !state.resting) {
-      const e = this.gridPoint(0.04, state.emitter.lane);
-      const flick = Math.floor(this.time * 6) % 2 === 0 ? 0.5 : 0.3;
-      lights.push({ x: e.x, y: e.y, radius: 4 * gs, intensity: flick, color: C.shimmer });
+      const e = river.pointAt(0.05, state.emitter.lane);
+      waterLights.push({ x: e.x, z: e.z, radius: 0.5, intensity: 0.18 + 0.08 * Math.sin(this.time * 9), color: C.shimmer });
     }
     if (this.telegraph) {
-      const e = this.gridPoint(0.04, state.emitter.lane);
+      const e = river.pointAt(0.05, state.emitter.lane);
       const grow = Math.min(1, this.telegraph.age / this.config.telegraphLead);
-      lights.push({ x: e.x, y: e.y, radius: (4 + 7 * grow) * gs, intensity: 0.5 + 0.4 * grow, color: C.eel });
+      waterLights.push({ x: e.x, z: e.z, radius: 0.6 + 0.5 * grow, intensity: 0.6 + 0.6 * grow, color: C.eel });
     }
 
-    const net = this.gridPoint(1, state.net.prevLane + (state.net.lane - state.net.prevLane) * alpha);
-    const railPx = (this.river.screenAt(1, 1).x - this.river.screenAt(1, 0).x) * this.gridScale;
-
-    // Eel shock: glitch, the river goes dark, the neon dies.
+    // Eel shock: a white-blue flash, then the river goes dark and the neon dies.
     const shock = this.shock;
-    const darken = shock > 0 ? Math.min(0.55, shock * 1.6) : 0;
+    const darken = shock > 0 ? Math.min(0.55, Math.max(0, shock - 0.12) * 1.6) : 0;
     const neonOut = shock > 0 ? (shock > 0.6 ? 0.12 : Math.floor(shock * 14) % 2 === 0 ? 1 : 0.2) : 1;
-    const flicker = Math.floor(this.time * 7) % 5 === 0 ? 0.82 : 1;
-
+    const flash = shock > 0 && !this.reducedMotion ? Math.max(0, 1 - shock * 5) : 0;
+    const flicker = 0.9 + 0.1 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3);
     const dim = this.mode === 'title' ? 0.3 : this.mode === 'paused' ? 0.45 : this.mode === 'over' ? 0.5 : 0;
+
     this.drawHud();
     this.drawScreens();
     return {
       time: this.time,
       dt,
       fish,
-      netX: net.x,
-      netY: net.y,
-      netRadius: Math.round(this.config.net.radius * railPx),
-      netKick: this.netKick > 0.06 ? 1 : 0,
-      netVisible: this.mode !== 'title',
-      lights,
-      lantern: (0.6 + 0.06 * Math.sin(this.time * 2.3)) * flicker * (1 - darken),
+      airFish,
+      net: {
+        x: netWorld.x,
+        z: netWorld.z,
+        velocity: state.net.velocity,
+        lift,
+        bulge: this.bulge,
+        charge: Math.min(1, state.streak / 16),
+        visible: this.mode !== 'title',
+      },
+      basketFill: Math.min(1, this.basketWeight / this.config.winWeight),
+      waterLights,
+      eelLights,
+      lantern: flicker,
       breath: Math.sin(this.time * 1.4) > 0.3 ? 1 : 0,
       lean: this.mode === 'title' ? 0 : state.net.lane < 0.33 ? -1 : state.net.lane > 0.72 ? 1 : 0,
       jolt: shock > 0 && shock < 0.5 ? (Math.floor(shock * 30) % 2 === 0 ? 1 : -1) : 0,
       darken: Math.max(darken, dim),
       neon: neonOut,
-      glitch: shock > 0 && shock < 0.05 && !this.reducedMotion ? 2 : 0,
+      flash,
+      glitch: shock > 0 && shock < 0.06 && !this.reducedMotion ? 0.004 : 0,
+      drift: this.reducedMotion ? 0 : (netLane - 0.5) * 3 + Math.sin(this.time * 0.13) * 1.2,
     };
   }
 
@@ -585,8 +741,21 @@ export class Game {
     text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 30, '#99c8cd');
 
     const paused = this.mode === 'paused';
-    heading('paused-title', paused, 'PAUSED', at(0.36) - 8, '#8ff8ff');
-    button('resume', paused, 'RESUME', at(0.44));
+    heading('paused-title', paused, 'PAUSED', at(0.26) - 8, '#8ff8ff');
+    button('resume', paused, 'RESUME', at(0.34));
+    // Mix sliders: drawn here, operated through transparent range inputs laid over the tracks.
+    VOLUME_KEYS.forEach((key, i) => {
+      const y = at(0.34) + 36 + i * 18;
+      const trackW = 72;
+      const x = cx - 14;
+      const value = this.audio.getVolume(key);
+      v.label(`vol-${key}-label`, paused ? key.toUpperCase() : '', x - 6, y, '#c5e1e8', 'right');
+      v.panel(`vol-${key}-plate`, x - 62, y - 3, trackW + 70, 13, paused ? '#030911' : null, 11);
+      v.panel(`vol-${key}-track`, x, y + 2, trackW, 3, paused ? '#243e48' : null, 12);
+      v.panel(`vol-${key}-fill`, x, y + 2, Math.round(trackW * value), 3, paused ? '#29bcc2' : null, 13);
+      v.panel(`vol-${key}-knob`, x + Math.round((trackW - 4) * value), y - 1, 4, 9, paused ? '#ffd98a' : null, 14);
+      this.overlay.place(key, paused ? { x, y: y - 3, w: trackW, h: 13 } : null);
+    });
 
     const over = this.mode === 'over';
     const won = this.lossCause === null;
@@ -666,6 +835,20 @@ export class Game {
         else if (name === 'pause') {
           settle(9);
           this.setMode('paused');
+        } else if (name === 'koi-scoop') {
+          // A koi arriving in the net, stopped partway through the scoop-and-lift.
+          settle(9);
+          this.sim.debugSpawn('koi', this.sim.state.net.lane, 0.985);
+          for (let i = 0; i < 60 && this.scoop === 0; i++) this.frame(STEP);
+          for (let i = 0; i < 9; i++) this.frame(STEP);
+          if (this.scoop === 0) throw new Error('koi-scoop not reached');
+        } else if (name === 'eel-near') {
+          // An eel passing just beside the net.
+          settle(5, { startPhase: 1, skipRest: true });
+          const lane = this.sim.state.net.lane;
+          this.sim.debugSpawn('eel', lane > 0.5 ? lane - 0.3 : lane + 0.3, 0.86);
+          for (let i = 0; i < 14; i++) this.frame(STEP);
+          if (this.sim.state.status !== 'playing') throw new Error('eel-near ended the run');
         } else if (name === 'loss-eel') {
           settle(12);
           this.sim.debugSpawn('eel', this.sim.state.net.lane, 0.97);
@@ -702,20 +885,6 @@ export class Game {
       setAutoplay: (enabled: boolean) => {
         this.autoplay = enabled;
       },
-      paletteReport: () => {
-        const frame = this.view.readFrame();
-        const palette = new Set<number>();
-        const tex = this.view.assets.paletteTexture.image.data as Uint8Array;
-        for (let i = 0; i < tex.length; i += 4) palette.add(((tex[i] ?? 0) << 16) | ((tex[i + 1] ?? 0) << 8) | (tex[i + 2] ?? 0));
-        const used = new Set<number>();
-        let off = 0;
-        for (let i = 0; i < frame.data.length; i += 4) {
-          const c = ((frame.data[i] ?? 0) << 16) | ((frame.data[i + 1] ?? 0) << 8) | (frame.data[i + 2] ?? 0);
-          used.add(c);
-          if (!palette.has(c)) off++;
-        }
-        return { texels: frame.data.length / 4, offPalette: off, colorsUsed: used.size, paletteSize: palette.size };
-      },
     };
   }
 
@@ -736,11 +905,13 @@ export class Game {
       streak: s.streak,
       fish: s.fish.length,
       net: { lane: s.net.lane, velocity: s.net.velocity },
-      fishStyle: this.view.fishStyle,
+      actors: this.view.pixelsPerTexel === layout.scale ? 'device' : '3x',
+      basket: this.basketWeight,
       audioErrors: this.audio.errors.length,
       renderer: {
         calls: info.render.calls,
         triangles: info.render.triangles,
+        programs: info.programs?.length ?? 0,
         geometries: info.memory.geometries,
         textures: info.memory.textures,
       },
@@ -751,7 +922,14 @@ export class Game {
         height: this.canvas.height,
         dpr: window.devicePixelRatio || 1,
       },
-      layout: { scale: layout.scale, targetW: layout.targetW, targetH: layout.targetH, gridW: layout.gridW, gridH: layout.gridH },
+      layout: {
+        scale: layout.scale,
+        targetW: layout.targetW,
+        targetH: layout.targetH,
+        gridW: layout.gridW,
+        gridH: layout.gridH,
+        pixelsPerTexel: this.view.pixelsPerTexel,
+      },
       rippleEncoding: this.view.ripples.byteEncoded ? 'byte' : 'half-float',
     };
   }

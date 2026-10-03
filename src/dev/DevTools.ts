@@ -16,7 +16,6 @@ export function installDevTools(game: Game): void {
     lanes: true,
     speedProfile: data.speedProfile,
     laneMargin: data.laneMargin,
-    fish: game.view?.fishStyle ?? 'flat',
   };
 
   const editor = document.createElement('canvas');
@@ -126,10 +125,6 @@ export function installDevTools(game: Game): void {
     .name('path editor')
     .onChange((on: boolean) => (editor.style.display = on ? 'block' : 'none'));
   gui.add(state, 'lanes').name('lanes + hitboxes');
-  gui
-    .add(state, 'fish', ['flat', 'voxel'])
-    .name('fish style')
-    .onChange((v: 'flat' | 'voxel') => game.setFishStyle(v));
   const river = gui.addFolder('river fit');
   river.add(camera, 'focal', 600, 2000, 10).onFinishChange(apply);
   river.add(camera, 'horizonY', 0, 300, 1).onFinishChange(apply);

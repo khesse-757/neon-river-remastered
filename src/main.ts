@@ -7,7 +7,7 @@ if (!canvas) throw new Error('Missing #game-canvas element.');
 const params = new URLSearchParams(window.location.search);
 const game = new Game(canvas, {
   grid: params.get('grid'),
-  fish: params.get('fish'),
+  actors: params.get('actors'),
   forceByteRipples: params.get('ripple') === 'byte',
   seed: params.has('seed') ? Number(params.get('seed')) || 1 : undefined,
 });
