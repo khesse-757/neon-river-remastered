@@ -89,6 +89,8 @@ export class SceneRenderer {
   layout: Layout;
   /** Pixels per painting texel in the internal render (equals layout.scale at device resolution). */
   pixelsPerTexel = 1;
+  /** 0 = full, 1 = 3D layer at 2 px per texel, 2 = 1 px per texel and no bloom. Raised when frames run slow. */
+  quality = 0;
   /** World position of the fisherman's hands. */
   readonly grip = new THREE.Vector3();
   readonly triangles: { fish: Record<string, number> };
@@ -139,6 +141,11 @@ export class SceneRenderer {
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
     this.renderer.setPixelRatio(1);
+    // Software rasterizers (CI, blocklisted GPUs) start at the lowest quality instead of crawling down to it.
+    const gl = this.renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpu = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : '';
+    if (/swiftshader|llvmpipe|software/i.test(gpu)) this.quality = 2;
 
     const { gridW, gridH } = assets;
     this.layout = computeLayout(gridW, gridH, gridW, gridH);
@@ -322,8 +329,10 @@ export class SceneRenderer {
     // v2 caps the 3D layer near DPR 2: a DPR-3 phone renders it at 3 px per painting texel and the
     // final pass upscales with a sharp-bilinear filter, so painting pixels stay even.
     const capped = Math.max(2, Math.min(scale, Math.floor((scale * 2) / dpr)));
-    const k = this.options.actors === 'device' ? scale : this.options.actors === '3x' ? Math.min(3, scale) : Math.min(scale, capped);
+    const wanted = this.options.actors === 'device' ? scale : this.options.actors === '3x' ? Math.min(3, scale) : Math.min(scale, capped);
+    const k = this.quality === 0 ? wanted : Math.min(wanted, this.quality === 1 ? 2 : 1);
     this.pixelsPerTexel = k;
+    this.bloom.enabled = this.quality < 2;
     const iw = Math.max(1, Math.round((w * k) / scale));
     const ih = Math.max(1, Math.round((h * k) / scale));
     this.renderer.setSize(w, h, false);
@@ -344,6 +353,14 @@ export class SceneRenderer {
     this.camera.updateMatrixWorld(true);
     const f = this.assets.fishermanRect;
     (this.fishermanMaterial.uniforms.uRect!.value as THREE.Vector4).set(originX + f.x, originY + f.y, f.width, f.height);
+    return true;
+  }
+
+  /** Step the render quality down one level (slow GPU). Returns false when already at the floor. */
+  lowerQuality(): boolean {
+    if (this.quality >= 2) return false;
+    this.quality += 1;
+    this.resize(true);
     return true;
   }
 

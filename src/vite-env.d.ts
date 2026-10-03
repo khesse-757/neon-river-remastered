@@ -19,6 +19,7 @@ interface ThreeGameDiagnostics {
   renderer: { calls: number; triangles: number; geometries: number; textures: number; programs: number };
   canvas: { clientWidth: number; clientHeight: number; width: number; height: number; dpr: number };
   layout: { scale: number; targetW: number; targetH: number; gridW: number; gridH: number; pixelsPerTexel: number };
+  quality: number;
   rippleEncoding: string;
 }
 

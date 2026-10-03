@@ -52,6 +52,9 @@ Not fixed (recorded): net reads as floating at lane 1 and its cloth overlaps the
 - Round-2 minors fixed: Esc/P work while a slider has focus; the scoop mirrors onto its rising half instead of jumping; lantern body dims with the scene; hook states no longer double-count the basket; heap fish pulled inside the basket wall; diagnostics say `capped`.
 - Round-2 minors left: slider value is a few percent off near the track ends (native thumb width); tablet portrait (768×1024@2) crowds the top-left HUD against the banner; net at lane 0 / lane 1 extremes.
 
+## CI on Gate 1.5
+- CI was red on 0498a49 and 6bd29f1: GitHub's runners rasterize in software and the full-resolution 3D frame + bloom ran too slowly for the smoke test's timing. Fix: render quality steps down automatically (0 full → 1: 3D layer at 2 px/texel → 2: 1 px/texel, no bloom) after a run of frames slower than ~36 fps, and software rasterizers start at level 2. `PW_SOFTWARE_GL=1 npm run test:e2e` reproduces the CI renderer locally. This is also the fallback for weak phones; `quality` is in the diagnostics.
+
 ## Decisions
 - **Grid:** default 216×387. The painting's own pixel pitch measures 3.56 px (FFT of edge positions), so 216×387 is the only candidate that does not resample painted pixels. Other three kept behind `?grid=` until Kyle picks.
 - **Scaling:** integer only. One step larger is allowed when ≥ 90% of the painting's height still shows (crops sky/cobbles, never width). The low-res target is viewport-sized, so spare space is gutter, not letterbox.

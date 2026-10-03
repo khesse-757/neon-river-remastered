@@ -77,9 +77,15 @@ export class Game {
   view!: SceneRenderer;
 
   private readonly loop = new Loop(
-    (delta) => this.frame(delta),
+    (delta) => {
+      this.watchFrameRate();
+      this.frame(delta);
+    },
     () => undefined,
   );
+  private lastFrameAt = 0;
+  private slowFrames = 0;
+  private settleFrames = 90;
   private readonly audio = new AudioBus();
   private readonly overlay: Overlay;
   private input!: Input;
@@ -196,6 +202,24 @@ export class Game {
     this.overlay.setTexel(this.view.layout.scale / (window.devicePixelRatio || 1));
     this.setMode('title');
     this.frame(0);
+  }
+
+  /** Slow GPU (weak phone, software rendering): drop the 3D layer's resolution, then the bloom. */
+  private watchFrameRate(): void {
+    const now = performance.now();
+    const elapsed = now - this.lastFrameAt;
+    this.lastFrameAt = now;
+    if (this.settleFrames > 0 || document.hidden || elapsed > 500) {
+      this.settleFrames = Math.max(0, this.settleFrames - 1);
+      return;
+    }
+    // Count frames slower than ~36 fps; a run of them means the device cannot hold the load.
+    this.slowFrames = elapsed > 28 ? this.slowFrames + 1 : Math.max(0, this.slowFrames - 2);
+    if (this.slowFrames > 24) {
+      this.slowFrames = 0;
+      this.settleFrames = 60;
+      this.view.lowerQuality();
+    }
   }
 
   private confirm(): void {
@@ -957,6 +981,7 @@ export class Game {
         gridH: layout.gridH,
         pixelsPerTexel: this.view.pixelsPerTexel,
       },
+      quality: this.view.quality,
       rippleEncoding: this.view.ripples.byteEncoded ? 'byte' : 'half-float',
     };
   }
