@@ -37,8 +37,8 @@ const FISHERMAN_SRC = { x: 276, y: 1000 };
 
 const read = (p) => PNG.sync.read(readFileSync(p));
 const masks = JSON.parse(readFileSync('scripts/masks.json', 'utf8'));
-const bg = read('public/assets/original/background.png');
-const fisherman = read('public/assets/original/fisherman.png');
+const bg = read('assets-src/original/background.png');
+const fisherman = read('assets-src/original/fisherman.png');
 
 const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const rgbToHex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');

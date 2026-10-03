@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // The custom domain (neonriver2.kahdev.me) serves from the root.
+  base: '/',
   server: {
     host: '127.0.0.1',
     port: 5188,
@@ -12,7 +14,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    sourcemap: true,
+    sourcemap: false,
     chunkSizeWarningLimit: 900,
   },
 });
