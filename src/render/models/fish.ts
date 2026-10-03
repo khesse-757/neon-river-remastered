@@ -42,14 +42,14 @@ const BLUEGILL: Species = {
   paint: (t, angle) => {
     const top = Math.cos(angle);
     // Blue-green back, paler flanks, a dark ear spot behind the head.
-    const c = color('#2c6f7d').lerp(color('#7fb6b0'), THREE.MathUtils.smoothstep(-top, -0.3, 0.6));
+    const c = color('#4f9aa6').lerp(color('#b5ddd6'), THREE.MathUtils.smoothstep(-top, -0.3, 0.6));
     if (t > 0.18 && t < 0.3 && Math.abs(Math.abs(angle) - 1.15) < 0.38) c.copy(color('#0d1c2c'));
-    if (t < 0.07) c.lerp(color('#1d4658'), 0.5);
+    if (t < 0.07) c.lerp(color('#2f6f80'), 0.5);
     return c;
   },
   emit: () => 0,
   fins: (add) => {
-    const fin = color('#3f8f96');
+    const fin = color('#7cc4c4');
     add(
       [
         [0, 0, -0.04],
@@ -224,7 +224,7 @@ const EEL: Species = {
       0.4,
     );
   },
-  wave: { k: 13, amp: 0.085, head: 0.45 },
+  wave: { k: 8.5, amp: 0.06, head: 0.4 },
   glow: color('#39e6ee'),
 };
 
@@ -384,7 +384,8 @@ export class FishSchool {
               '#include <emissivemap_fragment>',
               `#include <emissivemap_fragment>
                float rim = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
-               totalEmissiveRadiance += vec3(0.25, 0.42, 0.55) * step(0.55, rim) * 0.22;
+               // Moonlit rim: keeps the silhouette readable against dark water without glowing.
+               totalEmissiveRadiance += vec3(0.3, 0.5, 0.62) * step(0.5, rim) * 0.34;
                totalEmissiveRadiance += uGlow * vEmit * vLook.y;`,
             )
             .replace(

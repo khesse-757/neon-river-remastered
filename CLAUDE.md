@@ -105,7 +105,7 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
 `phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `koi-scoop`, `eel-near`,
 `loss-eel`, `loss-escaped`.
-Look-dev URL params: `?actors=3x` (3D layer at 3 px per painting texel instead of device pixels),
+Look-dev URL params: `?actors=device` (3D layer at full device pixels; default caps it near DPR 2), `?actors=3x`,
 `?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`.
 
 - `node scripts/record.mjs --url http://127.0.0.1:4188 --out <dir>` — 9 s active-play videos on both

@@ -30,16 +30,21 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 - **Basket = progress:** fills with landed weight / 200 lb.
 - **Lights:** hemisphere + moon directional + neon fill directional + lantern point light + up to 3 eel point lights (real three.js lights on MeshToonMaterial). The painting takes the lantern as a stepped per-texel pool; the fisherman is relit with normals derived from his own pixels in the shader.
 - **Parallax:** only the far layer (sky + skyline, flood-filled mask) slides, in whole texels, with the net and a slow drift. Sliding the bridge layer would detach it from the 3D props standing on it.
-- **Actor resolution A/B:** device pixels vs 3 px per texel (`?actors=3x`). Recommend device: at 3x the nearest upscale to a 5x phone gives uneven painting pixels and stair-stepped 3D edges.
+- **Actor resolution A/B:** device pixels (`?actors=device`) vs capped (default: about DPR 2, i.e. 3 px per painting texel on a DPR-3 phone, upscaled by a sharp-bilinear final pass so painting pixels stay even). Recommend **capped**: on the phone crop the two are nearly indistinguishable and capped shades 64% fewer pixels. A plain nearest upscale at 3 px/texel (first attempt) gave uneven painting pixels; the sharp-bilinear filter fixed that.
 - **Audio:** 5 buses → master low-cut 80 Hz / −3.5 dB shelf at 8.5 kHz / +1.5 dB at 2.8 kHz → compressor → limiter. Music ducks under banners and the shock. Assets are normalized offline (`scripts/normalize-audio.mjs`): music −16 LUFS, ambience −24 LUFS, one-shots −3 dBFS peak.
 - **Streak melody:** composed 32-step call-and-answer in D hirajoshi plus a 32-step variation (64 steps before it repeats), onsets nudged ≤ 40 ms to the music's 8th-note grid, koi chord, layers at 8/16/32, falling resolution on a miss. Voice is a sampled koto pluck (measured at 307.8 Hz) repitched; Karplus-Strong fallback.
 - **Music loop:** measured 80 BPM, D-centred; trimmed to exactly 48 s (64 beats); 20 ms edge fades because the raw wrap jumped 4× a normal sample step.
 
 ## Gate 1.5 measurements (2026-10-03, production preview, Apple GPU — not a phone)
-- 58–59 fps (vsync-bound) at 1440×900 and at 1170×2532; p95 frame 17.6 ms. `?actors=3x` measures the same here, so this machine cannot separate them.
-- Draw calls ≤ 70 (budget 100 mobile / 200 desktop). Triangles ≤ 5.4k. 2 post passes (bloom, final).
-- Textures 61 vs the inspector's mobile starting budget of 40: every UI label is its own tiny texture. Still to fix with a glyph atlas.
-- Payload before audio ≈ 860 kB (JS 626 kB / 168 kB gzip, default-grid scene, fonts). Audio 1.2 MB. Budget 4 MB.
+- Desktop 1440×900: 59.3 fps, p95 17.1 ms. Mobile 390×844 @3, capped (default): 59.4 fps, p95 17.1 ms. Mobile at full device resolution: 57.2 fps. All vsync-bound on a desktop GPU; a mid-range phone is unmeasured.
+- Draw calls ≤ 69 in play, 85 on the pause screen (budget 100 mobile / 200 desktop). Triangles ≤ 5.4k. 2 post passes (bloom, final).
+- Textures 61–81 vs the inspector's mobile starting budget of 40: every UI label is its own tiny texture. Fix with a glyph atlas in Gate 2.
+- First load before audio ≈ 0.8 MB (JS 168 kB gzip, default-grid scene, fonts); audio 1.2 MB. Budget 4 MB. `dist/` also carries files the game never loads (original 2.2 MB painting, three unused grids, source maps) — Gate 4 cleanup.
+- Loudness after normalization (reviewer's ffmpeg measurements): music −16.5 LUFS, ambience −24.6 LUFS, SFX peaks −3.0 to −3.7 dBFS, chime −5.6.
+
+## Gate 1.5 fresh-eyes review, round 1 (HEAD 0498a49): "needs fixes" — 0 blockers, 8 majors
+Fixed: bluegill readability (lighter paint, less fog, earlier rise, larger, moonlit rim, stronger wakes and emitter light); lantern moved off the catch line onto the deck; basket shows a heap of individual fish instead of a blue dome; HUD moves top-left when there is no gutter (was covering the basket); slider rows spaced for 44 px hit areas; arrow keys work on sliders; paused game keeps music and ambience playing so the mix can be set by ear (hidden tab suspends audio in every mode); 3D layer capped near DPR 2. Minors fixed: fisherman relight no longer blooms, 3D actors dim with the scene, scoop no longer snaps on back-to-back catches, calmer eel wave, hook states count the basket, 26 ms of leading silence trimmed from the music loop.
+Not fixed (recorded): net reads as floating at lane 1 and its cloth overlaps the parapet at lane 0; `dispose()` does not free every GPU resource (HMR only); the end-of-run screen steps the sim with a variable delta; no automated test for the sliders or AudioBus.
 
 ## Decisions
 - **Grid:** default 216×387. The painting's own pixel pitch measures 3.56 px (FFT of edge positions), so 216×387 is the only candidate that does not resample painted pixels. Other three kept behind `?grid=` until Kyle picks.

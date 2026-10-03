@@ -127,7 +127,10 @@ export class Game {
         this.audio.setMuted(!this.audio.isMuted);
         this.overlay.setMuted(this.audio.isMuted);
       },
-      volume: (key, value) => this.audio.setVolume(key, value),
+      volume: (key, value) => {
+        this.audio.setVolume(key, value);
+        if (key === 'sfx') this.audio.preview();
+      },
     });
     for (const key of VOLUME_KEYS) this.overlay.setRange(key, this.audio.getVolume(key));
     this.overlay.setMuted(this.audio.isMuted);
@@ -168,7 +171,7 @@ export class Game {
     ]);
     this.view = new SceneRenderer(this.canvas, assets, this.river, {
       forceByteRipples: this.options.forceByteRipples,
-      actors: (this.options.actors === '3x' ? '3x' : 'device') as ActorResolution,
+      actors: (this.options.actors === '3x' || this.options.actors === 'device' ? this.options.actors : 'auto') as ActorResolution,
       netRadius: this.config.net.radius * this.river.railWidth,
     });
     this.input = new Input(this.canvas, {
@@ -181,6 +184,8 @@ export class Game {
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.mode === 'playing') this.setMode('paused');
+      // A hidden tab is silent in every mode; a paused game keeps its beds so the mix can be set by ear.
+      this.audio.setPaused(document.hidden);
     });
     window.addEventListener('blur', () => {
       if (this.mode === 'playing') this.setMode('paused');
@@ -225,7 +230,6 @@ export class Game {
   private setMode(mode: Mode): void {
     if (mode === 'playing' && this.mode === 'paused') this.input?.flush();
     this.mode = mode;
-    this.audio.setPaused(mode === 'paused');
     const s = this.sim.state;
     this.overlay.announce(mode, { cause: this.lossCause, caught: s.caught, escaped: s.escaped, bestStreak: s.bestStreak });
     this.canvas.style.cursor = mode === 'playing' ? 'none' : 'default';
@@ -304,7 +308,9 @@ export class Game {
         const p = this.fishPoint(event.fish);
         const koi = event.fish.kind === 'koi';
         this.audio.catch(event.streak, koi);
-        this.scoop = 0.0001;
+        // A second catch mid-lift keeps the lift going instead of snapping it back down.
+        if (this.scoop === 0) this.scoop = 0.0001;
+        else if (this.scoop > SCOOP_TIME * 0.6) this.scoop = SCOOP_TIME * 0.35;
         this.bulge = 1;
         this.drip = 0.9;
         ripples.inject(p.x, p.y, koi ? 5 : 4, koi ? 0.9 : 0.7);
@@ -448,7 +454,7 @@ export class Game {
       // A faint wake line carries the read at the far bend, where the fish itself is tiny.
       if (fish.status === 'swimming' && this.time - last > 0.12) {
         this.wake.set(fish.id, this.time);
-        ripples.inject(p.x, p.y - 2 * rel, 0.9 + 1.6 * rel, 0.07 + 0.1 * rel);
+        ripples.inject(p.x, p.y - 2 * rel, 1 + 1.6 * rel, 0.16 + 0.12 * rel);
       }
       if (fish.kind === 'eel' && fish.status === 'swimming' && rel > 0.2 && this.fx.next() < dt * (fish.firstEel ? 26 : 14)) {
         // Arcs crawl along the body.
@@ -523,7 +529,7 @@ export class Game {
       const phase = this.time * rate + f.id * 1.7;
       const u = f.prevProgress + (f.progress - f.prevProgress) * alpha;
       // A fish rises steadily as it nears the net: depth, fog and brightness all change together.
-      const rise = THREE.MathUtils.smoothstep(u, 0.35, 0.98);
+      const rise = THREE.MathUtils.smoothstep(u, 0.15, 0.95);
       const eel = f.kind === 'eel';
 
       if (f.status === 'scooped') {
@@ -555,9 +561,9 @@ export class Game {
         z: -a.z,
         heading,
         pitch: 0,
-        scale: 1.18,
+        scale: 1.35,
         phase,
-        fog: (eel ? 0.42 : 0.5) * (1 - rise) + 0.1,
+        fog: (eel ? 0.3 : 0.36) * (1 - rise) + 0.05,
         glow: eel ? 0.7 + 0.5 * pulse : f.kind === 'koi' ? 0.35 * pulse * rise : 0,
         flash: 0,
         flop: 0,
@@ -605,7 +611,7 @@ export class Game {
     // The emitter's lane shimmers at the far bend; an incoming eel glows cold blue there.
     if (this.mode === 'playing' && !state.resting) {
       const e = river.pointAt(0.05, state.emitter.lane);
-      waterLights.push({ x: e.x, z: e.z, radius: 0.5, intensity: 0.18 + 0.08 * Math.sin(this.time * 9), color: C.shimmer });
+      waterLights.push({ x: e.x, z: e.z, radius: 0.6, intensity: 0.42 + 0.14 * Math.sin(this.time * 9), color: C.shimmer });
     }
     if (this.telegraph) {
       const e = river.pointAt(0.05, state.emitter.lane);
@@ -666,9 +672,11 @@ export class Game {
     const w = 100;
     const h = 23;
     const inGutter = gutter >= h + 6;
-    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : Math.max(originX, safe.left) + 4;
-    // Without a gutter the tablet sits on the cobbles, inside whatever part of them is visible.
-    const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : Math.min(bottom, originY + gridH) - h - 4;
+    const controlSize = Math.max(13, Math.ceil(44 / this.texelCss()));
+    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : safe.left + 3;
+    // Without a gutter the tablet sits top-left under the pause button, over trees and sky: the
+    // cobbles belong to the basket and the fisherman.
+    const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : safe.top + controlSize + 8;
     v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
     v.panel('hud-lip', x, y, w, 1, show ? '#5f696c' : null);
@@ -744,8 +752,9 @@ export class Game {
     heading('paused-title', paused, 'PAUSED', at(0.26) - 8, '#8ff8ff');
     button('resume', paused, 'RESUME', at(0.34));
     // Mix sliders: drawn here, operated through transparent range inputs laid over the tracks.
+    const rowPitch = Math.max(18, Math.ceil(46 / this.texelCss()));
     VOLUME_KEYS.forEach((key, i) => {
-      const y = at(0.34) + 36 + i * 18;
+      const y = at(0.34) + 24 + Math.ceil(rowPitch / 2) + 6 + i * rowPitch;
       const trackW = 72;
       const x = cx - 14;
       const value = this.audio.getVolume(key);
@@ -813,6 +822,7 @@ export class Game {
         this.sim.step(STEP, opts.idle ? { kind: 'none' } : trackerIntent(this.sim.state, this.config.net.radius));
         for (const e of this.sim.drainEvents())
           if (e.type === 'restStart' || e.type === 'phaseStart' || e.type === 'lose' || e.type === 'win') this.onEvent(e);
+          else if (e.type === 'catch') this.basketWeight += e.weight;
       }
       // The last stretch runs through the full frame path so wakes, ripples and particles exist.
       for (let t = 0; t < warm && this.mode === 'playing'; t += STEP) this.frame(STEP);

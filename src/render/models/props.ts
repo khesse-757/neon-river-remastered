@@ -218,12 +218,14 @@ export class BasketProp {
   readonly root = new THREE.Group();
   /** World position fish are tossed to. */
   readonly mouth = new THREE.Vector3();
-  private readonly pile: THREE.Mesh;
-  private readonly tails: THREE.Mesh[] = [];
+  private readonly heap: THREE.InstancedMesh;
   private shown = 0;
 
-  constructor(ramp: THREE.Texture, size: number, layer: number) {
-    this.size = size;
+  constructor(
+    ramp: THREE.Texture,
+    private readonly size: number,
+    layer: number,
+  ) {
     const weave = pixelArt(
       8,
       8,
@@ -250,49 +252,64 @@ export class BasketProp {
       new THREE.Vector2(size * 0.94, size * 1.05),
     ];
     const body = new THREE.Mesh(new THREE.LatheGeometry(profile, 16), toon(ramp, { map: weave, side: THREE.DoubleSide }));
-    const base = new THREE.Mesh(new THREE.CircleGeometry(size * 0.7, 16), toon(ramp, { color: color('#3a2a16') }));
+    const base = new THREE.Mesh(new THREE.CircleGeometry(size * 0.7, 16), toon(ramp, { color: color('#2a1d0e') }));
     base.rotation.x = -Math.PI / 2;
     base.position.y = size * 0.02;
     const rim = new THREE.Mesh(new THREE.TorusGeometry(size * 0.97, size * 0.07, 6, 20), toon(ramp, { color: color('#5a3f20') }));
     rim.rotation.x = Math.PI / 2;
     rim.position.y = size * 1.02;
-    // The catch: a silver-blue heap that rises as the basket fills, with a few tails showing.
-    this.pile = new THREE.Mesh(
-      new THREE.SphereGeometry(size * 0.9, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      toon(ramp, { color: color('#8fb9c4') }),
-    );
-    this.pile.scale.set(1, 0.001, 1);
-    this.root.add(body, base, rim, this.pile);
-    const tailGeometry = new THREE.ConeGeometry(size * 0.16, size * 0.42, 4);
-    const tints = ['#7fb6b0', '#f08a24', '#3f8f96', '#ffc24a', '#2c6f7d'];
-    tints.forEach((hex, i) => {
-      const tail = new THREE.Mesh(tailGeometry, toon(ramp, { color: color(hex) }));
-      const a = (i / tints.length) * Math.PI * 2 + 0.6;
-      tail.position.set(Math.cos(a) * size * 0.45, 0, Math.sin(a) * size * 0.45);
-      tail.rotation.set(Math.sin(a) * 0.5, a, Math.cos(a) * 0.5);
-      tail.visible = false;
-      this.tails.push(tail);
-      this.root.add(tail);
-    });
+    this.root.add(body, base, rim);
+
+    // The catch: individual fish (body + tail) stacked in rings, revealed one by one as weight lands.
+    const fishBody = new THREE.SphereGeometry(1, 8, 6);
+    fishBody.scale(0.34, 0.2, 1);
+    const tail = new THREE.ConeGeometry(0.34, 0.6, 4);
+    tail.rotateX(-Math.PI / 2);
+    tail.scale(1, 0.25, 1);
+    tail.translate(0, 0, -1.2);
+    const merged = new THREE.BufferGeometry();
+    const parts = [fishBody.toNonIndexed(), tail.toNonIndexed()];
+    for (const name of ['position', 'normal'] as const) {
+      const arrays = parts.map((g) => g.getAttribute(name).array as Float32Array);
+      const out = new Float32Array(arrays.reduce((n, a) => n + a.length, 0));
+      let offset = 0;
+      for (const a of arrays) {
+        out.set(a, offset);
+        offset += a.length;
+      }
+      merged.setAttribute(name, new THREE.BufferAttribute(out, 3));
+    }
+    this.heap = new THREE.InstancedMesh(merged, toon(ramp, {}), HEAP_FISH);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const tints = ['#9fd0cf', '#6fb0b8', '#b5ddd6', '#f08a24', '#84c2c4', '#ffc24a', '#5f9faa'];
+    for (let i = 0; i < HEAP_FISH; i++) {
+      // Deterministic pile: rings that climb and tighten, each fish lying at its own angle.
+      const layerIndex = Math.floor(i / 6);
+      const a = i * 2.39996;
+      const r = size * (0.5 - layerIndex * 0.06) * (i % 6 === 0 ? 0.25 : 1);
+      q.setFromEuler(new THREE.Euler(Math.sin(i * 1.7) * 0.5, a * 1.3, Math.cos(i * 2.3) * 0.5));
+      m.compose(
+        new THREE.Vector3(Math.cos(a) * r, size * (0.14 + layerIndex * 0.19), Math.sin(a) * r),
+        q,
+        new THREE.Vector3(1, 1, 1).multiplyScalar(size * 0.36),
+      );
+      this.heap.setMatrixAt(i, m);
+      this.heap.setColorAt(i, color(tints[i % tints.length] ?? '#9fd0cf'));
+    }
+    this.heap.count = 0;
+    this.heap.frustumCulled = false;
+    this.root.add(this.heap);
     this.root.traverse((o) => o.layers.set(layer));
   }
 
-  private readonly size: number;
-
-  /** fill 0..1 = caught weight toward the goal. Eased so the heap grows, not jumps. */
+  /** fill 0..1 = landed weight toward the goal. Fish appear one at a time, so the heap grows. */
   update(fill: number, dt: number): void {
-    this.shown += (fill - this.shown) * (1 - Math.exp(-4 * dt));
-    const level = this.size * (0.12 + this.shown * 0.95);
-    // Empty basket shows its dark base; the heap only appears once fish have landed.
-    const spread = 0.35 + 0.65 * Math.sqrt(this.shown);
-    this.pile.visible = this.shown > 0.004;
-    this.pile.position.y = level * 0.5;
-    this.pile.scale.set(spread, 0.12 + this.shown * 0.6, spread);
-    this.tails.forEach((tail, i) => {
-      tail.visible = this.shown > 0.03 + i * 0.16;
-      tail.position.y = level + this.size * 0.1;
-    });
+    this.shown += (fill - this.shown) * (1 - Math.exp(-6 * dt));
+    this.heap.count = this.shown > 0.002 ? Math.min(HEAP_FISH, 1 + Math.floor(this.shown * (HEAP_FISH - 1) + 0.5)) : 0;
     this.root.updateMatrixWorld(true);
     this.mouth.set(0, this.size * 1.2, 0).applyMatrix4(this.root.matrixWorld);
   }
 }
+
+const HEAP_FISH = 30;

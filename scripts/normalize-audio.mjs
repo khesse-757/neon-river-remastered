@@ -14,6 +14,8 @@ const JOBS = [
     in: `${SRC}/music-calm-raw.mp3`,
     out: 'public/audio/music/calm-loop.mp3',
     lufs: -16,
+    // Drop the encoder's leading silence so beat one sits at t = 0.
+    skip: 0.0265,
     trim: 48,
     edge: 'afade=t=in:d=0.02,afade=t=out:st=47.98:d=0.02',
   },
@@ -32,6 +34,7 @@ const analyse = (file, filter) => {
 
 for (const job of JOBS) {
   mkdirSync(dirname(job.out), { recursive: true });
+  const seek = job.skip ? ['-ss', String(job.skip)] : [];
   const pre = job.trim ? ['-t', String(job.trim)] : [];
   let filter;
   let note;
@@ -56,6 +59,7 @@ for (const job of JOBS) {
     '-loglevel',
     'error',
     '-y',
+    ...seek,
     '-i',
     job.in,
     ...pre,

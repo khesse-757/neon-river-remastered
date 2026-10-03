@@ -185,6 +185,11 @@ export class AudioBus {
     MISS_FALL.forEach((degree, i) => this.pluck(degree - 5, 0.3 - i * 0.05, ctx.currentTime + i * 0.16, 1400));
   }
 
+  /** A single melody note, so the SFX slider can be set by ear. */
+  preview(): void {
+    if (this.ctx) this.pluck(3, 0.8, this.ctx.currentTime);
+  }
+
   /** Soft tick on every spawn: the river's metronome. */
   spawn(): void {
     this.tone(1320, 0.05, 0.5, 'sine', 'ui');

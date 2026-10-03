@@ -237,7 +237,7 @@ void main() {
 
   // Ripple crests and troughs from the height-field.
   float h = rippleAt(tf);
-  float crest = smoothstep(0.12, 0.3, h);
+  float crest = smoothstep(0.07, 0.24, h);
   col = mix(col, vec3(0.55, 0.75, 0.86), crest * 0.7);
   alpha = max(alpha, crest * 0.7);
   float trough = smoothstep(0.14, 0.32, -h);
@@ -358,6 +358,8 @@ void main() {
   float lit = clamp(dot(n, normalize(uLightDir)), 0.0, 1.0);
   float stepLit = lit > 0.6 ? 1.0 : (lit > 0.3 ? 0.45 : 0.0);
   vec3 col = c.rgb * (1.0 + vec3(2.4, 1.5, 0.6) * stepLit * uLight) + vec3(0.05, 0.025, 0.0) * stepLit * uLight;
+  // Stay under the bloom threshold: lantern light warms him, it does not make him glow.
+  col = min(col, vec3(0.8, 0.62, 0.42));
   col += (c.rgb + 0.03) * vec3(1.2, 2.2, 3.0) * uFlash * (0.4 + clamp(-n.x, 0.0, 1.0));
   gl_FragColor = vec4(mix(col, vec3(0.0012, 0.0029, 0.0058), uDarken), 1.0);
 }`;
@@ -404,16 +406,25 @@ uniform sampler3D uLut;
 uniform float uGrade;
 uniform float uVignette;
 uniform float uGlitch;
+uniform vec2 uSource;
 varying vec2 vUv;
+// Sharp-bilinear: nearest inside each source pixel, a one-screen-pixel blend at its edges.
+vec2 sharp(vec2 uv) {
+  vec2 px = uv * uSource;
+  vec2 seam = floor(px + 0.5);
+  vec2 w = max(fwidth(px), vec2(1e-5));
+  return (seam + clamp((px - seam) / w, -0.5, 0.5)) / uSource;
+}
 vec3 toSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 void main() {
-  vec3 col = texture2D(tDiffuse, vUv).rgb;
+  vec2 uv = sharp(vUv);
+  vec3 col = texture2D(tDiffuse, uv).rgb;
   if (uGlitch > 0.0) {
-    col.r = texture2D(tDiffuse, vUv + vec2(uGlitch, 0.0)).r;
-    col.b = texture2D(tDiffuse, vUv - vec2(uGlitch, 0.0)).b;
+    col.r = texture2D(tDiffuse, uv + vec2(uGlitch, 0.0)).r;
+    col.b = texture2D(tDiffuse, uv - vec2(uGlitch, 0.0)).b;
   }
   vec2 d = vUv - 0.5;
   col *= 1.0 - uVignette * smoothstep(0.25, 0.85, dot(d, d) * 2.2);

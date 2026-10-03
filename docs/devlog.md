@@ -151,3 +151,15 @@ Media: `docs/media/gate-1.5/` — `v1-vs-gate1-vs-gate1.5.png`,
 ### Still can't do
 
 - Hear any of it, or run it on a real phone. Frame rates are from a desktop GPU.
+
+### Review round (Gate 1.5)
+
+The reviewer measured what I had only eyeballed: bluegill contrast against the
+water was within ±15 luma levels even right at the net. I had over-corrected
+Kyle's "fish are too bright" note into "fish are invisible". It also caught the
+3D lantern hanging directly over the spot where fish are caught, a basket whose
+"heap of fish" looked like a bucket of water, and pause-screen sliders that
+could not be heard (pausing suspended the audio) or used with arrow keys (the
+game's own key handler ate them). The resolution A/B flipped too: rendering the
+3D layer at 3 px per painted pixel looked bad with a nearest upscale, and fine
+with a sharp-bilinear one — so the cheaper option is now the default.

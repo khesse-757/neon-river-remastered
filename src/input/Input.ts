@@ -43,6 +43,8 @@ export class Input {
 
     on('keydown', (e) => {
       this.gesture();
+      // Sliders and other form controls keep their own keys.
+      if (e.target instanceof HTMLInputElement) return;
       if (e.repeat) return;
       if (LEFT_KEYS.has(e.code) || RIGHT_KEYS.has(e.code)) {
         this.held.add(e.code);

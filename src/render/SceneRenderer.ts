@@ -53,7 +53,7 @@ export interface FrameView {
 }
 
 /** How the 3D layer is rendered: at device pixels, or at three pixels per painting texel. */
-export type ActorResolution = 'device' | '3x';
+export type ActorResolution = 'auto' | 'device' | '3x';
 
 interface UiItem {
   mesh: THREE.Mesh;
@@ -116,6 +116,11 @@ export class SceneRenderer {
   private readonly lanternLight: THREE.PointLight;
   private readonly eelLights: THREE.PointLight[] = [];
   private readonly moon: THREE.DirectionalLight;
+  private readonly hemi: THREE.HemisphereLight;
+  private readonly neonFill: THREE.DirectionalLight;
+  private readonly fogBase = color('#063152');
+  private readonly fogNow = color('#063152');
+  private readonly night = color('#030911');
   private readonly ui = new Map<string, UiItem>();
   private readonly white: THREE.DataTexture;
   private readonly temp = new THREE.Vector3();
@@ -215,10 +220,12 @@ export class SceneRenderer {
     add(this.surface, this.quadFull, layer(GLSL.OCCLUDER_FRAG), 1);
 
     // Real lights for the 3D actors. Actor space flips z (three looks down -z).
-    const hemi = new THREE.HemisphereLight(color('#40649a'), color('#0b1622'), 1.5);
+    this.hemi = new THREE.HemisphereLight(color('#40649a'), color('#0b1622'), 1.5);
+    const hemi = this.hemi;
     this.moon = new THREE.DirectionalLight(color('#b7d2ff'), 2.4);
     this.moon.position.set(moonDir.x, moonDir.y, -moonDir.z).multiplyScalar(10);
-    const neon = new THREE.DirectionalLight(color('#a06bff'), 0.9);
+    this.neonFill = new THREE.DirectionalLight(color('#a06bff'), 0.9);
+    const neon = this.neonFill;
     neon.position.set(0.5, 0.35, -1).multiplyScalar(10);
     this.lanternLight = new THREE.PointLight(color('#ffb060'), 0.05, 1.1, 2);
     const lights: THREE.Light[] = [hemi, this.moon, neon, this.lanternLight];
@@ -232,7 +239,7 @@ export class SceneRenderer {
       this.actors.add(light);
     }
 
-    const fog = color('#063152');
+    const fog = this.fogNow;
     this.fish = new FishSchool(assets.ramp, fog, LAYER_RIVER);
     this.airFish = new FishSchool(assets.ramp, fog, LAYER_BRIDGE);
     this.actors.add(this.fish.group, this.airFish.group);
@@ -248,7 +255,8 @@ export class SceneRenderer {
     };
     this.grip.copy(place(553, 1266, 0.2));
     this.lantern = new LanternProp(assets.ramp, 0.04, LAYER_BRIDGE);
-    this.lantern.root.position.copy(place(476, 1064, 0.1));
+    // On the deck in front of the parapet, clear of the rail where fish are caught.
+    this.lantern.root.position.copy(place(268, 1196, 0.1));
     this.basket = new BasketProp(assets.ramp, 0.052, LAYER_BRIDGE);
     this.basket.root.position.copy(place(382, 1262, 0.1));
     this.actors.add(this.lantern.root, this.basket.root);
@@ -294,6 +302,7 @@ export class SceneRenderer {
           uGrade: { value: 0.18 },
           uVignette: { value: 0.35 },
           uGlitch: { value: 0 },
+          uSource: { value: new THREE.Vector2(1, 1) },
         },
       }),
     );
@@ -310,16 +319,20 @@ export class SceneRenderer {
     if (!force && w === this.layout.canvasW && h === this.layout.canvasH && this.canvas.width === w) return false;
     this.layout = computeLayout(w, h, this.assets.gridW, this.assets.gridH);
     const { originX, originY, scale } = this.layout;
-    const k = this.options.actors === '3x' ? Math.min(3, scale) : scale;
+    // v2 caps the 3D layer near DPR 2: a DPR-3 phone renders it at 3 px per painting texel and the
+    // final pass upscales with a sharp-bilinear filter, so painting pixels stay even.
+    const capped = Math.max(2, Math.min(scale, Math.floor((scale * 2) / dpr)));
+    const k = this.options.actors === 'device' ? scale : this.options.actors === '3x' ? Math.min(3, scale) : Math.min(scale, capped);
     this.pixelsPerTexel = k;
     const iw = Math.max(1, Math.round((w * k) / scale));
     const ih = Math.max(1, Math.round((h * k) / scale));
     this.renderer.setSize(w, h, false);
     this.composer.setSize(iw, ih);
     for (const target of [this.composer.renderTarget1, this.composer.renderTarget2]) {
-      target.texture.magFilter = THREE.NearestFilter;
-      target.texture.minFilter = THREE.NearestFilter;
+      target.texture.magFilter = THREE.LinearFilter;
+      target.texture.minFilter = THREE.LinearFilter;
     }
+    (this.final.uniforms.uSource!.value as THREE.Vector2).set(iw, ih);
     (this.shared.uCanvas!.value as THREE.Vector2).set(iw, ih);
     this.shared.uScale!.value = k;
     (this.shared.uOrigin!.value as THREE.Vector2).set(originX, originY);
@@ -437,7 +450,12 @@ export class SceneRenderer {
     const flame = this.toTexel(this.lantern.flame);
     const gs = this.assets.gridW / 216;
     (s.uLantern!.value as THREE.Vector4).set(flame.x, flame.y + 9 * gs, 40 * gs, 0.55 * view.lantern);
-    this.moon.intensity = 2.4 * (1 - view.darken * 0.7) + view.flash * 6;
+    // The 3D actors dim with the painting behind menus and after the shock.
+    const lit = 1 - view.darken;
+    this.moon.intensity = 2.4 * lit + view.flash * 6;
+    this.hemi.intensity = 1.5 * lit;
+    this.neonFill.intensity = 0.9 * lit * view.neon;
+    this.fogNow.copy(this.fogBase).lerp(this.night, view.darken);
 
     this.netVisible = view.net.visible;
     this.net.root.visible = view.net.visible;
@@ -449,7 +467,7 @@ export class SceneRenderer {
     man.uBreath!.value = view.breath;
     man.uLean!.value = view.lean;
     man.uJolt!.value = view.jolt;
-    man.uLight!.value = 0.5 * view.lantern;
+    man.uLight!.value = 0.3 * view.lantern;
 
     this.fish.update(view.fish);
     this.airFish.update(view.airFish);
