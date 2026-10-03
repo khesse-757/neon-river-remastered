@@ -18,11 +18,21 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 - [x] Gate 1 — Look-dev slice: merged as the foundation (PR #1, 2026-10-03). Look NOT approved: too flat and low-res.
 - [x] Gate 1.5 — Art direction v2 + audio: approved by Kyle after round 3; merged (PR #2, 2026-10-03)
 - [x] Gate 2 — Feature complete (`prompts/02-feature-complete.md`): merged (PR #3, 2026-10-03, CI green on b9f6b9c)
-- [ ] Gate 3 — Release (`prompts/03-release.md`)
+- [ ] Gate 3 — Release (`prompts/03-release.md`): in progress on `release/v2.0.0`; waiting for Kyle's go to merge (the merge is the first deploy)
 
 Working rules changed on 2026-10-03: CLAUDE.md now has a **verification budget (lean mode)**; the playtester agent runs on Sonnet.
 
-## Current state (2026-10-03: Gate 2 merged to `main`; next is the release pass on `gate-3/release`)
+## Gate 3 — release 2.0.0 (branch `release/v2.0.0`)
+
+- **Deploy:** `.github/workflows/deploy.yml` (push to `main` → build → secret scan of `dist/` → Pages). Pages read back on 2026-10-03: `build_type: workflow`, `cname: neonriver2.kahdev.me`, certificate approved, `https_enforced: false` (enforce after the first deploy). `vite.config.ts` has `base: '/'`; `public/CNAME` is documentation only.
+- **Build:** sourcemaps off; the v1 source art and `water_net.wav` moved from `public/assets/original/` to `assets-src/original/` (only build scripts read them). `dist/` is 4.1 MB (audio 2.1 MB). Chunks: main 697 kB (191 kB gzip), Gallery 20.8 kB, DevTools 34.8 kB and Audition 3.7 kB (both only with `?debug` or on the dev server).
+- **Polish:** manifest (portrait, fullscreen), icons 192 / 512 + maskable + apple-touch, favicons, `og.png` (1200×630), Open Graph and Twitter tags, `404.html`. All images come from `scripts/build-brand.mjs`.
+- **Repo:** README with media from `scripts/readme-media.mjs` (production build), CHANGELOG, ARCHITECTURE, CREDITS, LICENSE, VERSION, bug-report template, `docs/media/social-preview.png` (Kyle uploads it in Settings → General).
+- **Freesound:** nilbul's "Water splash" (id 404829) is CC0. v1 never recorded the id; the durations fit a trimmed copy but the match is not confirmed by ear.
+- **No tuning changes in this gate.**
+- **Still to do, in order:** Kyle's go → merge → first deploy → enforce HTTPS → verify the live site on desktop and a phone viewport → Kyle's go → tag `v2.0.0` and the GitHub release. Then `gh repo edit` for the description, homepage and topics (Kyle approves the call).
+
+## State at the end of Gate 2 (2026-10-03)
 
 ### What Gate 2 added
 
@@ -366,4 +376,4 @@ Fixed after the review (not re-reviewed by the agent; verified by my own capture
 ## Next actions
 
 1. Kyle: answer item 2 (Normal's first 30 s) and item 7 (real-device notes); listen to the rain and thunder.
-2. Start `prompts/03-release.md` on `gate-3/release` when Kyle says so.
+2. Gate 3 is on `release/v2.0.0`; see the Gate 3 section at the top for what is left.

@@ -411,3 +411,98 @@ merged with no conflicts. It adds 7.9 kB gzip, loaded only when the button is pr
   turntable one side was always unlit. In the river it is seen from above and nobody noticed. It is
   now two faces a hair apart, each lit as if it leaned.
 - Assist is out of the design. Zen is the casual mode.
+
+## Gate 3: release 2.0.0 (2026-10-03)
+
+The last entry. This one is the summary for the blog post.
+
+### v1 to v2 in one paragraph
+
+v1 was a Canvas 2D game: one painting, flat sprites, fish spawned at random, a speed multiplier that
+rose with the score. v2 keeps the painting, the fisherman, the rules (200 lb to win, 20 lb may
+escape, an eel ends the night) and the catch sound. Everything else is new: a three.js renderer with
+3D fish, water and net inside the painting; a deterministic simulation that scripts the night as
+stages; three modes; generated music, weather and a catch melody; a Field Guide; settings for sound
+and picture. It was built in two days of sessions, 2 to 3 October 2026, in four gates.
+
+### The art pivot
+
+Gate 1 followed the first art rules to the letter: every pixel on the painting's 216×387 grid, flat
+sprites, a 48-color lock. It was faithful and Kyle did not like it: flat and low-res. The second
+direction ("the painting, in 3D") kept the painting as a pixel-art world and made everything the
+player touches a toon-lit 3D object at device resolution. The simulation, input, tests and UI did not
+change during the pivot, because the rules never knew what a pixel was. That is the best argument in
+the project for keeping game logic pure.
+
+### The fish-pattern research
+
+The original minigame does not spawn fish at random. The OpenGOAL decompilation shows one emitter
+sweeping across the river on a timer, with the night scripted as phases. That is why its fish arrive
+in lines you can follow. The remaster's emitter does the same and adds S-runs (a chain of fish
+snaking bank to bank), bank swaps in the last stage, and a fairness guard for eels. The original has
+rests between phases; Kyle played ours and asked for the opposite, so the stages now run into each
+other and each speed-up brings a run.
+
+### Modes
+
+Zen cannot be lost (eels become fish, no escape limit, keep fishing after the win). Normal is the
+game. Storm Night starts at Normal's first speed-up, adds two stages, half again the eels and a 15-lb
+limit. Its first table was unwinnable: perfect bot 80%, human-like bot 0 of 100. It took easing
+several things together, aimed at where the human-like bot leaked pounds, to reach 100% and 29%.
+
+### What Claude Code and the skills did well
+
+- The pure, seeded simulation. It made the art pivot cheap, let bots play hundreds of nights in
+  seconds, and let tests check fairness over 200 seeds.
+- Doing the arithmetic before tuning. Three times the brief's numbers could not work as written
+  (keyboard speed under the cap, more fish than a night could hold, an unwinnable hard mode) and the
+  sums showed it before any playtest did.
+- The independent reviewer. A second agent that runs the build cold found a clipped HUD, overlapping
+  buttons and a test hook that had never reached the state it claimed.
+- Parallel work on isolated parts. The Field Guide was built by a second agent in its own worktree
+  against a written contract and merged with no conflicts.
+- The skills pack's structure: test hooks that reach real states, a diagnostics object, a progress
+  file. Sessions could be cleared and resumed from `artifacts/game-progress.md`.
+
+### What they did badly
+
+- Followed the letter of the first art rules into a look nobody wanted. A rough mock-up for Kyle
+  before building the pipeline would have saved a gate.
+- Cannot hear. Every level and loop seam was measured, not listened to. Two thunder takes came back
+  almost silent and the audition page was silent because of a mute button; Kyle found both by ear.
+- Cannot hold a phone. Safe areas, touch feel and Safari were only ever checked by Kyle.
+- Over-verified. Before lean mode, a small change could trigger scorecards, manifests, videos and
+  repeat playtests chasing a 2% shift. The verification budget in CLAUDE.md fixed that by rule.
+- The skills pack's defaults pull toward photoreal PBR and generic glow. A project skill had to
+  override them.
+- The first hero GIF for the README was 14 MB. It was cut from a screen recording, and the video
+  codec's noise made every pixel change on every frame. Capturing lossless frames at a tenth of game
+  speed and using a 64-color palette with no dither (the painting has 48 colors) gave 4.6 MB.
+
+### Key numbers
+
+- 2 days, 4 gates, 5 pull requests before the release PR, 42 commits on `main` before the release
+  branch.
+- About 11,000 lines of TypeScript in `src/`.
+- Painting: 768×1376 and 224,459 colors, down to 216×387 and 48 colors, 108 kB.
+- Production build: 4.1 MB in total, of which audio is 2.1 MB. Main script 697 kB (191 kB gzip);
+  Field Guide 20.8 kB (7.9 kB gzip), loaded on demand; dev tools 35 kB + 4 kB, never loaded without
+  `?debug`. Moving the v1 source art out of `public/` took 2.4 MB out of the build, and the
+  sourcemaps no longer ship.
+- A Normal night: speed-ups at about 0:30 / 1:00 / 1:30, median win 2:02. The bot-played night
+  recorded for the README won at 204 lb in 2:05 with 2 lb escaped.
+- Storm Night: perfect bot 100%, human-like bot 29%, median win 2:27.
+- CI: two required jobs, each about a minute.
+
+### The best media for the post
+
+1. `docs/media/readme/hero.gif` — ten seconds of Normal: a speed-up, an S-run, an eel slipping past.
+2. `docs/media/readme/v1-vs-v2.png` — the two title screens side by side.
+3. `docs/media/gate-1.5/v1-vs-gate1-vs-gate1.5.png` — the art pivot in one picture.
+4. `docs/media/gate-1/sheet-grid-desktop.png` — the four pixel grids from the look-dev that was rejected.
+5. `docs/media/gate-1/sheet-fish-flat-vs-voxel.png` — flat sprites against voxel fish, a dead end.
+6. `docs/media/readme/win.png` — the lantern finale.
+7. `docs/media/readme/field-guide.png` — the koi on its turntable.
+8. `docs/media/gate-1.5-r3/full-run-desktop.mp4` — a whole bot-played night.
+9. `docs/media/gate-2/looks.png` — the four looks.
+10. `docs/media/readme/eel-shock.png` — the blackout when an eel reaches the net.
