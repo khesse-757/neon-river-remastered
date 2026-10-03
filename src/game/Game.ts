@@ -159,6 +159,8 @@ export class Game {
   private hookNight = false;
   /** Storm Night was opened by the win just shown. */
   private justUnlocked = false;
+  /** A test hook opened the locked modes for this visit (never saved). */
+  private hookUnlock = false;
   private code: number[] = [];
   private gallery: GalleryHandle | null = null;
   private galleryLoading = false;
@@ -271,7 +273,7 @@ export class Game {
   }
 
   private locked(mode: GameMode): boolean {
-    return mode.lockedBlurb !== undefined && !this.records.hardUnlocked;
+    return mode.lockedBlurb !== undefined && !this.records.hardUnlocked && !this.hookUnlock;
   }
 
   /** Storm Night opens: a Normal win, or the code. */
@@ -1384,11 +1386,13 @@ export class Game {
       y + 12 * k,
       danger ? '#ff9933' : '#9ccbcf',
     );
+    // The streak sits to the right of the tablet, or above it where there is no room (left gutter, 2X on a phone).
+    const above = beside || x + w + 4 + 26 * k > targetW;
     v.label(
       'hud-streak',
       show && this.mode !== 'over' && s.streak >= 3 ? `x${s.streak}` : '',
-      beside ? x + 5 * k : x + w + 4,
-      beside ? y - 11 * k : y + 8 * k,
+      above ? x + 5 * k : x + w + 4,
+      above ? y - 11 * k : y + 8 * k,
       '#ffd98a',
     );
     v.uiZoom = 1;
@@ -1766,7 +1770,7 @@ export class Game {
         this.startRun(0, true);
         this.setMode('title');
         // Tests reach a locked mode without earning it; the unlock is not saved.
-        if (this.locked(modeById(id))) this.records.hardUnlocked = true;
+        if (this.locked(modeById(id))) this.hookUnlock = true;
         this.setGameMode(id);
       },
       openAdvancedVisuals: (open: boolean) => this.panel.setVisualsOpen(open),
