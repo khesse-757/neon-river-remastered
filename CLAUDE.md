@@ -27,7 +27,7 @@ anything visual. Do **not** use `threejs-3d-generator`. Use
 
 - TypeScript strict. Vite. three.js via npm (`three/addons/...` for addons).
 - `src/sim/` is pure game logic (phases, emitters, lanes, spline, catching,
-  scoring, assist). No three.js, DOM, audio, or timers in it. Driven by fixed
+  scoring). No three.js, DOM, audio, or timers in it. Driven by fixed
   timestep + seeded RNG. Everything else subscribes to sim events.
 - No `Math.random()` in gameplay — use the seeded RNG.
 - All motion is delta-time based. No per-frame lerps.

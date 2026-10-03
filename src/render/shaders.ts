@@ -451,8 +451,10 @@ void main() {
   col = col / (1.0 + max(vec3(0.0), col - 0.8) * 0.6);
   vec3 s = toSrgb(col);
   float l = dot(s, vec3(0.299, 0.587, 0.114));
-  s = clamp(mix(vec3(l), s, uSat) * uTint, 0.0, 1.0);
-  s = mix(s, uWash.rgb * (0.2 + 0.8 * l), uWash.a);
+  // Gold stays gold in every look: strongly warm pixels (koi, the lantern) keep their own color.
+  float warm = smoothstep(0.3, 0.55, s.r - s.b) * smoothstep(0.0, 0.1, s.r - s.g);
+  s = clamp(mix(vec3(l), s, mix(uSat, max(uSat, 1.0), warm)) * mix(uTint, vec3(1.0), warm), 0.0, 1.0);
+  s = mix(s, uWash.rgb * (0.2 + 0.8 * l), uWash.a * (1.0 - warm));
   vec3 graded = texture(uLut, s * (31.0 / 32.0) + 0.5 / 32.0).rgb;
   gl_FragColor = vec4(mix(s, graded, uGrade), 1.0);
 }`;

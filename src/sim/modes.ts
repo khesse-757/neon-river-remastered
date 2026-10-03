@@ -15,8 +15,11 @@ export interface GameMode {
   readonly unlocks: boolean;
   /** The night can be lost. When false, a win offers to keep fishing with no goal. */
   readonly losable: boolean;
-  /** Render side: 'storm' is steady light rain with lightning. */
-  readonly weather: 'clear' | 'storm';
+  /**
+   * Render side. 'story': the night's own weather (light rain from the second speed-up, heavier in
+   * the last stage, clearing on the win). 'storm': steady rain with lightning from the start.
+   */
+  readonly weather: 'clear' | 'story' | 'storm';
   readonly apply: (base: SimConfig) => SimConfig;
 }
 
@@ -38,7 +41,7 @@ export const MODES: readonly GameMode[] = [
     blurb: 'DODGE EELS. 20 LB MAY ESCAPE',
     unlocks: true,
     losable: true,
-    weather: 'clear',
+    weather: 'story',
     apply: (base) => base,
   },
   {

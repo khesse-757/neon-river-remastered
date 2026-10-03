@@ -19,7 +19,10 @@ interface Species {
   readonly paint: (t: number, angle: number) => THREE.Color;
   /** 0..1 self-light at that point (eel stripes). */
   readonly emit: (t: number, angle: number) => number;
-  readonly fins: (add: (points: [number, number, number][], t: number[], c: THREE.Color, e?: number) => void) => void;
+  /** `normal` overrides the face normal (an upright fin is lit as if it leaned, so neither side goes black). */
+  readonly fins: (
+    add: (points: [number, number, number][], t: number[], c: THREE.Color, e?: number, normal?: [number, number, number]) => void,
+  ) => void;
   /**
    * Spine wave: number of waves along the body, amplitude as a fraction of length, how much the head moves.
    * Kept small: the head holds its lane, so a chain of fish reads as a curve; only the tail works.
@@ -89,14 +92,29 @@ const BLUEGILL: Species = {
       [0.3, 0.42, 0.4],
       fin,
     );
+    // The dorsal fin stands upright, so it is two faces a hair apart, each lit from above on its own side.
+    const dorsal = color('#377a88');
     add(
       [
-        [0, 0.016, 0.012],
-        [0, 0.026, -0.012],
-        [0, 0.011, -0.03],
+        [-0.0004, 0.016, 0.012],
+        [-0.0004, 0.026, -0.012],
+        [-0.0004, 0.011, -0.03],
       ],
       [0.3, 0.55, 0.8],
-      color('#235a68'),
+      dorsal,
+      0,
+      [-0.45, 0.89, 0],
+    );
+    add(
+      [
+        [0.0004, 0.016, 0.012],
+        [0.0004, 0.011, -0.03],
+        [0.0004, 0.026, -0.012],
+      ],
+      [0.3, 0.8, 0.55],
+      dorsal,
+      0,
+      [0.45, 0.89, 0],
     );
   },
   wave: { k: 5.5, amp: 0.055, head: 0.04 },
@@ -293,7 +311,7 @@ function buildGeometry(spec: Species): THREE.BufferGeometry {
     }
     index.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
   }
-  spec.fins((points, t, c, e = 0) => {
+  spec.fins((points, t, c, e = 0, normal) => {
     const base = pos.length / 3;
     const n = new THREE.Vector3()
       .subVectors(
@@ -308,6 +326,7 @@ function buildGeometry(spec: Species): THREE.BufferGeometry {
       )
       .normalize();
     if (n.y < 0) n.negate();
+    if (normal) n.set(...normal).normalize();
     points.forEach((p, i) => {
       pos.push(...p);
       nor.push(n.x, n.y, n.z);

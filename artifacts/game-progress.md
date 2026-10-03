@@ -78,20 +78,30 @@ Reviewer at e8c50d5: no blockers, no majors, six minors. It ran check, build, re
 - Left open: the bluegill's dark dorsal fin looks broken on the turntable; the Moonlight look makes koi and bluegill the same color (shape and the +5 still differ).
 - The reviewer could not judge: audio, real devices, phone frame rate, the shimmer in motion (stills only), keyboard turn/zoom on the turntable.
 
-### Decisions for Kyle
+### Kyle's decisions on Gate 2 (2026-10-03) and what was done
 
-1. **Storm Night's top speed is 1.6, not 1.76.** The last two speed-ups are +7% each instead of +12%, and those stages sweep instead of swapping banks, to make the human-like target reachable with a 15-lb budget. Say if you would rather have the full +12% steps and a lower win rate.
-2. **Normal changed to pay for the lull fix:** slightly more eels early, koi 8% → 7%, speed-ups at 45 / 97 / 148 lb. Play it and say if the early game now feels too busy.
-3. **Weather exists only in Storm Night.** Normal and Zen are clear nights; the Weather switch does nothing there. The brief's per-stage weather is still unbuilt.
-4. **Rain and thunder audio:** thunder is a procedural rumble and there is no rain bed. Approve generating both with ElevenLabs if you want them.
-5. **"No assist" in Storm Night:** no assist exists in any mode yet, so there was nothing to turn off.
-6. **HUD size is 1X / 2X only** (whole multiples keep the pixels square); the look presets and rain need your eye on a real phone.
-7. Still yours from round 3: audio by ear, the motif choice, a real-phone pass.
+1. Storm Night keeps its tuning (top speed 1.6, about 29% human-like). "Fair beats brutal."
+2. Normal's early game: **not answered** (the reply still had its template text). No spawn numbers changed.
+3. **Weather in Normal** (`weather: 'story'`): light rain from the second speed-up (level 0.7), heavier in Bank to Bank (1.7), clearing on the win; rain level eases over about 2 s. Zen stays clear. Storm Night unchanged (level 1 plus lightning). The Weather switch turns all of it off. No lightning in Normal.
+4. **Rain and thunder audio** generated with ElevenLabs (sources in `assets-src/audio/`): `rain-light` and `rain-heavy` 16 s loops, normalized to −29 and −25 LUFS, crossfaded by rain level on the ambience fader; three thunder rolls at −4 dBFS peak, picked at random with a small pitch spread (the synthesized rumble remains as the fallback until they load). All five are fetched the first time a night can rain, not with the page (about 0.77 MB).
+5. **No assist:** removed from the brief, CLAUDE.md and the playtester agent. Zen covers casual play.
+6. HUD 1X / 2X stays.
+7. Real-device notes: **none given** (template text).
+
+Also fixed: the bluegill's dorsal fin is now two faces lit from above on each side (it was black on its unlit side on the turntable); strongly warm pixels (koi, the lantern) keep their color in every look, Moonlight included.
+
+Ran: `npm run check`, Playwright smoke (desktop + mobile), one screenshot each of the fin, the Moonlight koi and Normal's rain. No playtester run (no spawn numbers changed).
+
+### Open for Kyle
+
+- Item 2 (does Normal's first 30 s feel too busy?) and item 7 (real-device notes).
+- By ear: the rain layers, the three thunder rolls (thunder 1 and 3 were generated very quiet and needed +29 / +23 dB, so listen for hiss), plus the round-3 audio items.
 
 ### Open minors
 
 - Eel hook states (`eel-near`, `eel-basket`, `loss-eel`) still spawn an eel in Zen (test hooks only).
 - The Field Guide's Net "Original" shows v1's `NET` sprite array; v1 drew its net procedurally, so that sprite may never have been on screen.
+- In Moonlight the koi's white patches read like a bluegill's flank; only its orange patches and gleam stay warm.
 - Landscape phones: no orientation hint; the Field Guide is not tuned for landscape.
 - The first spawn after a speed-up still waits out the previous stage's gap; spawn guards only fire under `?tune`.
 - Focus ring crosses neighbouring text at 1 CSS px per texel; net looks detached at lane 1; `dispose()` leaks on HMR; `dist/` ships unused files (release pass).
@@ -99,7 +109,7 @@ Reviewer at e8c50d5: no blockers, no majors, six minors. It ran check, build, re
 
 ### Not verified by anyone
 
-- Audio by ear (including thunder); real phone / Safari / gamepad; haptics; frame rate on a mid-range phone; swipe code on a real touch screen (emulated touch only).
+- Audio by ear (including the rain loops' seams and thunder); real phone / Safari / gamepad; haptics; frame rate on a mid-range phone; swipe code on a real touch screen (emulated touch only).
 
 ## Gate 1.5, round 3b (Kyle playing the build, 2026-10-03) — S-runs, modes, HUD moves
 

@@ -396,3 +396,18 @@ them.
 The gallery is isolated enough (its own chunk, its own small renderer) that a second agent built it
 in a separate worktree against a written contract while the sim and menus changed underneath. It
 merged with no conflicts. It adds 7.9 kB gzip, loaded only when the button is pressed.
+
+### After Kyle's Gate 2 notes
+
+- Normal now tells the night's story in weather: light rain from the second speed-up, heavier in
+  Bank to Bank, clearing on the win. Zen stays clear.
+- Rain is two generated loops (light and heavy) crossfaded by one "how hard is it raining" number,
+  and thunder is three generated rolls. Two of the thunder takes came back almost silent (peaks of
+  -33 and -27 dBFS) and were raised by 29 and 23 dB in normalization; nobody has listened yet.
+- "Koi stay gold in every look" turned out to be one line in the grade: pixels that are strongly
+  warm (red well above blue, and above green) skip the desaturation and tint. The lantern keeps its
+  color for free.
+- The bluegill's dorsal fin was a single upright triangle with a sideways normal, so on the
+  turntable one side was always unlit. In the river it is seen from above and nobody noticed. It is
+  now two faces a hair apart, each lit as if it leaned.
+- Assist is out of the design. Zen is the casual mode.

@@ -23,6 +23,15 @@ const FILES: Record<string, string> = {
   music: 'audio/music/calm-loop.mp3',
 };
 
+/** Weather sounds are fetched the first time a night can rain, not with the page. */
+const WEATHER_FILES: Record<string, string> = {
+  rainLight: 'audio/ambience/rain-light-loop.mp3',
+  rainHeavy: 'audio/ambience/rain-heavy-loop.mp3',
+  thunder1: 'audio/sfx/thunder-1.mp3',
+  thunder2: 'audio/sfx/thunder-2.mp3',
+  thunder3: 'audio/sfx/thunder-3.mp3',
+};
+
 /** Measured pitch of the koto sample (autocorrelation + third harmonic). */
 const KOTO_HZ = 307.8;
 const CHIME_HZ = 1760;
@@ -112,6 +121,9 @@ export class AudioBus {
   private reverbReturn: GainNode | null = null;
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly loops = new Map<'ambience' | 'music', { source: AudioBufferSourceNode; fade: GainNode }>();
+  private readonly rain = new Map<string, { source: AudioBufferSourceNode; gain: GainNode }>();
+  private rainLevel = 0;
+  private weatherLoading = false;
   private readonly cue = new Set<AudioScheduledSourceNode>();
   private voices: number[] = [];
   private readonly lastPlayed = new Map<string, number>();
@@ -373,6 +385,7 @@ export class AudioBus {
     this.bedsOn = on;
     if (!on) this.stopLoops();
     else if (this.ctx) this.startLoops();
+    this.applyRain();
   }
 
   /** Start the ambience and music beds (once their files have decoded). */
@@ -619,10 +632,70 @@ export class AudioBus {
     this.crackle(1.0, 0.3);
   }
 
-  /** Distant thunder: a low roll of noise that sinks as it fades. */
+  /** Fetch and decode the rain and thunder files (once). Until they arrive, thunder is a synthesized rumble. */
+  loadWeather(): void {
+    if (this.weatherLoading) return;
+    this.weatherLoading = true;
+    for (const [id, path] of Object.entries(WEATHER_FILES)) {
+      void (async (): Promise<void> => {
+        try {
+          const response = await fetch(`${import.meta.env.BASE_URL}${path}`);
+          if (!response.ok) throw new Error(`${response.status}`);
+          const data = await response.arrayBuffer();
+          if (this.ctx) await this.decode(id, data, this.ctx);
+          else this.pending.push([id, data]);
+          this.applyRain();
+        } catch (error) {
+          this.errors.push(`${id}: ${String(error)}`);
+          console.warn(`Audio "${id}" failed to load; continuing without it.`, error);
+        }
+      })();
+    }
+  }
+
+  /** How hard it is raining: 0 none, about 0.7 light, 1.7 heavy. The two layers crossfade on the ambience fader. */
+  setRain(level: number): void {
+    if (Math.abs(level - this.rainLevel) < 0.02 && level > 0 === this.rainLevel > 0) return;
+    this.rainLevel = level;
+    this.applyRain();
+  }
+
+  private applyRain(): void {
+    const { ctx } = this;
+    const bus = this.buses.get('ambience');
+    if (!ctx || !bus) return;
+    const level = this.bedsOn && this.allowed('rain') ? this.rainLevel : 0;
+    const want: Record<string, number> = {
+      rainLight: Math.min(1, level) * (1 - 0.5 * Math.max(0, Math.min(1, level - 1))),
+      rainHeavy: Math.max(0, Math.min(1, level - 0.9)),
+    };
+    for (const [id, target] of Object.entries(want)) {
+      let layer = this.rain.get(id);
+      const buffer = this.buffers.get(id);
+      if (!layer && target > 0 && buffer) {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        // Loop inside the encoder's padding so the seam is rain, not a gap.
+        source.loopStart = 0.05;
+        source.loopEnd = Math.max(1, buffer.duration - 0.08);
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        source.connect(gain).connect(bus);
+        source.start();
+        layer = { source, gain };
+        this.rain.set(id, layer);
+      }
+      layer?.gain.gain.setTargetAtTime(target, ctx.currentTime, 0.6);
+    }
+  }
+
+  /** Thunder: one of three recorded rolls, or a synthesized rumble until they have loaded. */
   thunder(): void {
     if (!this.allowed('thunder')) return;
-    this.noise(2.8, 0.2, 'lowpass', 240, 70, 0.12);
+    const id = `thunder${1 + Math.floor(this.rng.next() * 3)}`;
+    if (this.buffers.has(id)) this.play(id, 'sfx', 0.55, 0.92 + this.rng.next() * 0.16);
+    else this.noise(2.8, 0.2, 'lowpass', 240, 70, 0.12);
   }
 
   /** Filtered noise with a swell-and-fade envelope (the rush of a speed-up, the frying basket). */

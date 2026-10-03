@@ -166,6 +166,8 @@ export class Game {
   private galleryLoading = false;
   private galleryTexel = 0;
   private fps = 60;
+  /** How hard it is raining now (0 none, ~0.7 light, 1.7 heavy); eases toward what the night calls for. */
+  private rain = 0;
   private rainTimer = 0;
   private ringTimer = 0;
   /** Seconds until the next lightning; seconds into the current one (0 = none); seconds until its thunder. */
@@ -922,14 +924,22 @@ export class Game {
 
   /** Storm Night's weather: steady light rain, rings on the water, and lightning with its thunder. */
   private updateWeather(dt: number): void {
-    const storm = this.gameMode.weather === 'storm' && this.visuals.settings.weather;
-    if (!storm) {
-      this.bolt = 0;
-      return;
-    }
+    const on = this.visuals.settings.weather;
+    const storm = this.gameMode.weather === 'storm' && on;
+    // Normal tells the night's story: light rain from the second speed-up, heavier in the last
+    // stage, clearing as the win is celebrated. Storm Night rains from the title screen on.
+    const stage = this.sim.state.stageIndex;
+    const story = this.mode === 'title' || this.win > 0 ? 0 : stage >= 3 ? 1.7 : stage >= 2 ? 0.7 : 0;
+    const target = !on ? 0 : storm ? 1 : this.gameMode.weather === 'story' ? story : 0;
+    this.rain += (target - this.rain) * (1 - Math.exp(-dt / 1.8));
+    if (this.rain < 0.01 && target === 0) this.rain = 0;
+    if (target > 0) this.audio.loadWeather();
+    this.audio.setRain(this.rain);
+    if (!storm) this.bolt = 0;
+    if (this.rain === 0) return;
     const { particles, ripples, layout } = this.view;
     // Rain: short streaks across the whole screen, gutters included. Reduced motion keeps only the rings.
-    this.rainTimer += dt * (this.reducedMotion ? 0 : 90 * this.visuals.settings.particles);
+    this.rainTimer += dt * (this.reducedMotion ? 0 : 90 * this.rain * this.visuals.settings.particles);
     while (this.rainTimer >= 1) {
       this.rainTimer -= 1;
       const x = -layout.originX + this.fx.next() * (layout.targetW + 30);
@@ -939,12 +949,13 @@ export class Game {
       for (let k = 0; k < 6; k++)
         particles.emit({ x: x + k * 0.14, y: y - k * 1.05, vx: -30, vy: 230, life, color: C.rain, size: 1.5, glow: 1 - k * 0.12 });
     }
-    this.ringTimer += dt * 9;
+    this.ringTimer += dt * 9 * this.rain;
     while (this.ringTimer >= 1) {
       this.ringTimer -= 1;
       const p = this.gridPoint(0.25 + this.fx.next() * 0.75, this.fx.next());
       ripples.inject(p.x, p.y, 1.6, 0.22);
     }
+    if (!storm) return;
     // Lightning: a double flicker, or one slow soft glow when flashing is reduced.
     if (this.bolt > 0) {
       this.bolt += dt;
