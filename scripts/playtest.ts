@@ -44,7 +44,7 @@ interface Run {
 }
 
 const river = new River(RIVER);
-// --mode zen plays the eel-free mode.
+// --mode zen | hard plays that mode's table.
 const modeArg = process.argv.indexOf('--mode');
 const CONFIG = configFor(modeArg >= 0 ? process.argv[modeArg + 1] : 'normal');
 const median = (values: number[]): number => {
@@ -144,9 +144,9 @@ function summarize(name: string, runs: Run[]): Record<string, unknown> {
     escapedMedianInWins: median(wins.map((r) => r.escaped)),
     lossStages: byPhase,
     // Median time of each speed-up, over the runs that reached it.
-    speedUpMedians: [0, 1, 2].map(
-      (i) => +median(runs.filter((r) => r.speedUps[i] !== undefined).map((r) => r.speedUps[i] ?? 0)).toFixed(1),
-    ),
+    speedUpMedians: CONFIG.speedUps
+      .map((_, i) => i)
+      .map((i) => +median(runs.filter((r) => r.speedUps[i] !== undefined).map((r) => r.speedUps[i] ?? 0)).toFixed(1)),
     maxSpawnGap: +Math.max(...runs.map((r) => r.maxGap)).toFixed(3),
     emptyNetZoneSecondsMedian: +median(runs.map((r) => r.emptyZone)).toFixed(2),
     runsPerNightMedian: median(runs.map((r) => r.runs)),

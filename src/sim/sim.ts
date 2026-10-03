@@ -75,15 +75,12 @@ export interface EmitterState {
   afterTelegraphed: boolean;
   /** Spawns rolled since the last eel. */
   sinceEel: number;
-  /** The last place rolled was left empty (a mode without eels). */
-  lastEmpty: boolean;
 }
 
 /** One place in the stream, decided ahead of time. */
 export interface Slot {
-  /** Null: an eel was rolled in a mode without eels, so nothing spawns here. */
-  kind: FishKind | null;
-  /** Rolled as an eel (whether or not the mode has eels): its neighbours keep their distance in time. */
+  kind: FishKind;
+  /** An eel: its neighbours keep their distance in time. */
   eel: boolean;
   /** Progress 0..1 through an S-run, or null outside one. */
   run: number | null;
@@ -94,6 +91,8 @@ export type RunStatus = 'playing' | 'won' | 'lost';
 export interface SimState {
   time: number;
   status: RunStatus;
+  /** The night was won and the player kept fishing: there is no second win. */
+  endless: boolean;
   lossCause: LossCause | null;
   /** 0 = Still Water; each speed-up adds one. */
   stageIndex: number;
@@ -156,6 +155,7 @@ export class Sim {
       // Starting later in the night (test hooks) puts the clock where that stage would begin.
       time: stageIndex > 0 ? (speedUps[stageIndex - 1]?.seconds ?? 0) : 0,
       status: 'playing',
+      endless: false,
       lossCause: null,
       stageIndex,
       stage,
@@ -184,7 +184,6 @@ export class Sim {
         telegraphed: false,
         afterTelegraphed: false,
         sinceEel: 0,
-        lastEmpty: false,
       },
       net: createNet(),
       fish: [],
@@ -237,6 +236,13 @@ export class Sim {
     stepNet(s.net, intent, dt, this.config.net);
     this.stepEmitter(dt);
     this.advanceFish(dt, true);
+  }
+
+  /** After a win: carry on fishing the same river with no goal left to reach. */
+  keepFishing(): void {
+    if (this.state.status !== 'won') return;
+    this.state.status = 'playing';
+    this.state.endless = true;
   }
 
   /** Place a fish directly (test hooks and unit tests). */
@@ -319,16 +325,10 @@ export class Sim {
     return { ...this.place(eel, koi ? 'koi' : 'bluegill'), run: null };
   }
 
-  /**
-   * What goes in a place. In a mode without eels, an eel's place is left empty, but never two in a
-   * row: the second becomes a fish, so the river is never bare for long.
-   */
-  private place(eel: boolean, otherwise: FishKind): { kind: FishKind | null; eel: boolean } {
-    const { emitter } = this.state;
-    const empty = eel && !this.config.eels && !emitter.lastEmpty;
-    emitter.lastEmpty = empty;
+  /** What goes in a place. In a mode without eels, an eel's place is filled with a fish, never left as a gap. */
+  private place(eel: boolean, otherwise: FishKind): { kind: FishKind; eel: boolean } {
     if (eel && this.config.eels) return { kind: 'eel', eel: true };
-    return empty ? { kind: null, eel: true } : { kind: eel ? 'bluegill' : otherwise, eel: false };
+    return { kind: eel ? 'bluegill' : otherwise, eel: false };
   }
 
   /** Seconds between two consecutive places in the stream. Never even: a run tightens, the rest wanders. */
@@ -465,7 +465,7 @@ export class Sim {
       emitter.runK = slot.run ?? 0;
       const pinned = emitter.pinFish > 0;
       // A run that begins from a burst's bank starts at that bank: like a swap, it is the pattern.
-      if (slot.kind !== null) this.spawn(slot.kind, emitter.lane, pinned || fromBurst);
+      this.spawn(slot.kind, emitter.lane, pinned || fromBurst);
       emitter.spawnTimer += emitter.gap;
       emitter.next = emitter.afterNext;
       emitter.telegraphed = emitter.afterTelegraphed;
@@ -605,7 +605,7 @@ export class Sim {
     s.streak += 1;
     s.bestStreak = Math.max(s.bestStreak, s.streak);
     this.events.push({ type: 'catch', fish, weight, streak: s.streak, caught: s.caught });
-    if (s.caught >= this.config.winWeight) {
+    if (!s.endless && s.caught >= this.config.winWeight) {
       s.status = 'won';
       this.events.push({ type: 'win', time: s.time });
     }

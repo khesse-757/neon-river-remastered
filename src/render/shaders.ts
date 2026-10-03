@@ -193,6 +193,7 @@ uniform vec3 uMoonDir;
 uniform vec4 uLights[6]; // world x, z, radius, intensity
 uniform vec3 uLightColors[6];
 uniform float uReflect;
+uniform vec3 uSurge; // a speed-up's shimmer: front (world z), width, strength
 
 void main() {
   vec2 tf = texelF();
@@ -254,6 +255,15 @@ void main() {
     col += uLightColors[i] * a * (0.6 + 0.4 * clamp(0.5 + n2.x * 0.5, 0.0, 1.0));
     alpha = max(alpha, a * 0.45);
   }
+  // A speed-up: a band of broken light runs down the river with the quickening current.
+  if (uSurge.z > 0.0) {
+    float band = (wp.z - uSurge.x) / uSurge.y;
+    band = exp(-band * band);
+    float lines = texture2D(uNoise, vec2(wp.x * 7.0, wp.z * 1.3 + uTime * 0.9)).r;
+    float lit = (lines > 0.62 ? 1.0 : (lines > 0.5 ? 0.45 : 0.0)) * band * uSurge.z;
+    col = mix(col, vec3(0.36, 0.56, 0.66), lit * 0.6);
+    alpha = max(alpha, lit * 0.55);
+  }
   col += col * vec3(0.6, 0.8, 1.2) * uFlash;
   // Straight alpha here; the material blends premultiplied.
   gl_FragColor = vec4(dimmed(col) * alpha, alpha);
@@ -296,10 +306,11 @@ export const QUAD_VERT = /* glsl */ `
 precision highp float;
 uniform vec2 uTarget;
 uniform vec4 uRect; // x, y, w, h in target texels
+uniform float uZoom; // whole-number magnification (the HUD scale setting)
 varying vec2 vLocal;
 void main() {
   vLocal = position.xy * uRect.zw;
-  vec2 p = uRect.xy + vLocal;
+  vec2 p = uRect.xy + vLocal * uZoom;
   gl_Position = vec4(p.x / uTarget.x * 2.0 - 1.0, 1.0 - p.y / uTarget.y * 2.0, 0.0, 1.0);
 }`;
 
@@ -408,6 +419,10 @@ uniform float uVignette;
 uniform float uGlitch;
 uniform float uWarm;
 uniform vec2 uSource;
+uniform vec2 uShake; // whole-frame offset in uv (eel shock, thunder)
+uniform float uSat; // the Look preset: saturation, tint, and a wash toward one tone
+uniform vec3 uTint;
+uniform vec4 uWash;
 varying vec2 vUv;
 // Sharp-bilinear: nearest inside each source pixel, a one-screen-pixel blend at its edges.
 vec2 sharp(vec2 uv) {
@@ -421,7 +436,7 @@ vec3 toSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 void main() {
-  vec2 uv = sharp(vUv);
+  vec2 uv = sharp(vUv + uShake);
   vec3 col = texture2D(tDiffuse, uv).rgb;
   if (uGlitch > 0.0) {
     col.r = texture2D(tDiffuse, uv + vec2(uGlitch, 0.0)).r;
@@ -435,6 +450,11 @@ void main() {
   // Soft shoulder so bloomed highlights roll off instead of clipping.
   col = col / (1.0 + max(vec3(0.0), col - 0.8) * 0.6);
   vec3 s = toSrgb(col);
+  float l = dot(s, vec3(0.299, 0.587, 0.114));
+  // Gold stays gold in every look: strongly warm pixels (koi, the lantern) keep their own color.
+  float warm = smoothstep(0.3, 0.55, s.r - s.b) * smoothstep(0.0, 0.1, s.r - s.g);
+  s = clamp(mix(vec3(l), s, mix(uSat, max(uSat, 1.0), warm)) * mix(uTint, vec3(1.0), warm), 0.0, 1.0);
+  s = mix(s, uWash.rgb * (0.2 + 0.8 * l), uWash.a * (1.0 - warm));
   vec3 graded = texture(uLut, s * (31.0 / 32.0) + 0.5 / 32.0).rgb;
   gl_FragColor = vec4(mix(s, graded, uGrade), 1.0);
 }`;

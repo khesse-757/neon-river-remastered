@@ -10,6 +10,7 @@ import {
   type EqPreset,
 } from '../audio/settings';
 import { textCanvas } from '../render/PixelText';
+import { HUD_SCALES, LOOKS, QUALITY_PRESETS, RESOLUTION_STEPS, type VisualSettings, type VisualStore } from '../render/visuals';
 
 /** Width of the panel in texels. Fits a 320 px phone at one CSS pixel per texel. */
 export const PANEL_WIDTH = 208;
@@ -75,7 +76,7 @@ const COLORS = {
 const PLAY_ICON = ['#....', '##...', '###..', '####.', '###..', '##...', '#....'];
 
 /**
- * The sound settings: four simple rows and an Advanced audio section that expands below them.
+ * The settings: four simple sound rows, and Advanced audio and Advanced visuals sections that expand below them.
  * Everything visible is composed on one canvas at one pixel per texel and drawn by the game as a
  * single quad. The DOM side is a transparent, natively scrolling list of real form controls laid
  * exactly over that art, so touch scrolling, keyboard focus and screen readers all work.
@@ -89,6 +90,7 @@ export class SettingsPanel {
   private readonly controls = new Map<string, HTMLElement>();
   private rowList: Row[] = [];
   private advanced = false;
+  private visualsOpen = false;
   private dirty = true;
   private built = '';
   private texel = 2;
@@ -100,6 +102,7 @@ export class SettingsPanel {
 
   constructor(
     private readonly audio: AudioBus,
+    private readonly visuals: VisualStore,
     private readonly hooks: { changed: () => void } = { changed: () => undefined },
   ) {
     const scroller = document.querySelector<HTMLDivElement>('#settings-scroll');
@@ -121,6 +124,16 @@ export class SettingsPanel {
     this.dirty = true;
   }
 
+  get isVisualsOpen(): boolean {
+    return this.visualsOpen;
+  }
+
+  setVisualsOpen(open: boolean): void {
+    this.visualsOpen = open;
+    this.built = '';
+    this.dirty = true;
+  }
+
   hide(): void {
     if (!this.open) return;
     this.open = false;
@@ -134,7 +147,7 @@ export class SettingsPanel {
   show(x: number, y: number, height: number, texel: number): HTMLCanvasElement {
     const rowH = Math.max(16, Math.ceil(MIN_TOUCH / texel));
     const h = Math.max(rowH * 2, Math.floor(height));
-    const key = `${this.advanced}|${texel}|${rowH}`;
+    const key = `${this.advanced}|${this.visualsOpen}|${texel}|${rowH}`;
     if (key !== this.built) {
       this.texel = texel;
       this.rowH = rowH;
@@ -258,11 +271,111 @@ export class SettingsPanel {
         run: () => this.setAdvanced(!this.advanced),
       },
     ];
-    if (!this.advanced) return simple;
+    return [...simple, ...(this.advanced ? this.audioRows(master, fader, tone, flag, percent) : []), ...this.visualRows()];
+  }
+
+  /** Advanced visuals: every row applies at once and is saved by the store. */
+  private visualRows(): Row[] {
+    const store = this.visuals;
+    const opener: Row = {
+      kind: 'button',
+      id: 'visuals',
+      label: () => (this.visualsOpen ? 'ADVANCED VISUALS  -' : 'ADVANCED VISUALS  +'),
+      run: () => this.setVisualsOpen(!this.visualsOpen),
+    };
+    if (!this.visualsOpen) return [opener];
+    type Flag = { [K in keyof VisualSettings]: VisualSettings[K] extends boolean ? K : never }[keyof VisualSettings];
+    const flag = (key: Flag, label: string): ToggleRow => ({
+      kind: 'toggle',
+      id: `vis-${key}`,
+      label,
+      get: () => store.settings[key],
+      set: (on) => store.update({ [key]: on } as Partial<VisualSettings>),
+    });
+    const percent = (v: number): string => String(Math.round(v));
+    return [
+      opener,
+      { kind: 'heading', text: 'PICTURE' },
+      {
+        kind: 'choice',
+        id: 'vis-quality',
+        label: 'QUALITY',
+        options: QUALITY_PRESETS.map((q) => q.toUpperCase()),
+        get: () => QUALITY_PRESETS.indexOf(store.settings.quality),
+        set: (i) => store.update({ quality: QUALITY_PRESETS[i] ?? 'auto' }),
+      },
+      {
+        kind: 'choice',
+        id: 'vis-resolution',
+        label: 'RENDER',
+        options: RESOLUTION_STEPS.map((r) => `${Math.round(r * 100)}%`),
+        get: () => RESOLUTION_STEPS.indexOf(store.settings.resolution),
+        set: (i) => store.update({ resolution: RESOLUTION_STEPS[i] ?? 1 }),
+      },
+      {
+        kind: 'choice',
+        id: 'vis-look',
+        label: 'LOOK',
+        options: LOOKS.map((l) => l.label),
+        get: () => LOOKS.findIndex((l) => l.id === store.settings.look),
+        set: (i) => store.update({ look: LOOKS[i]?.id ?? 'night' }),
+      },
+      {
+        kind: 'slider',
+        id: 'vis-bloom',
+        label: 'BLOOM',
+        min: 0,
+        max: 150,
+        step: 10,
+        get: () => Math.round(store.settings.bloomIntensity * 100),
+        set: (v) => store.update({ bloomIntensity: v / 100 }),
+        text: percent,
+        toggle: { name: 'Bloom', get: () => store.settings.bloom, set: (on) => store.update({ bloom: on }) },
+      },
+      flag('reflections', 'WATER REFLECTIONS'),
+      flag('weather', 'WEATHER'),
+      {
+        kind: 'slider',
+        id: 'vis-particles',
+        label: 'PARTICLES',
+        min: 0,
+        max: 100,
+        step: 10,
+        get: () => Math.round(store.settings.particles * 100),
+        set: (v) => store.update({ particles: v / 100 }),
+        text: percent,
+      },
+      { kind: 'heading', text: 'MOTION' },
+      flag('drift', 'CAMERA DRIFT'),
+      flag('shake', 'SCREEN SHAKE'),
+      flag('reduceMotion', 'REDUCE MOTION'),
+      flag('reduceFlashing', 'REDUCE FLASHING'),
+      { kind: 'heading', text: 'HUD' },
+      {
+        kind: 'choice',
+        id: 'vis-hud',
+        label: 'HUD SIZE',
+        options: HUD_SCALES.map((k) => `${k}X`),
+        get: () => HUD_SCALES.indexOf(store.settings.hudScale),
+        set: (i) => store.update({ hudScale: HUD_SCALES[i] ?? 1 }),
+      },
+      flag('showFps', 'SHOW FPS'),
+      { kind: 'button', id: 'vis-reset', label: () => 'RESET VISUALS', run: () => store.reset() },
+    ];
+  }
+
+  private audioRows(
+    master: (id: string) => SliderRow,
+    fader: (id: string, label: string, key: Channel) => SliderRow,
+    tone: (id: 'bass' | 'mid' | 'treble', label: string) => SliderRow,
+    flag: (id: 'mono' | 'muteInBackground' | 'haptics', label: string) => ToggleRow,
+    percent: (v: number) => string,
+  ): Row[] {
+    const audio = this.audio;
+    const s = audio.settings;
     // Moving a tone slider leaves the preset; Night keeps its quieter, compressed output while edited.
     const presets = [...EQ_PRESET_IDS.map((p) => p.toUpperCase()), 'CUSTOM', 'NIGHT, EDITED'];
     return [
-      ...simple,
       { kind: 'heading', text: 'VOLUME' },
       master('adv-master'),
       fader('adv-music', 'MUSIC', 'music'),

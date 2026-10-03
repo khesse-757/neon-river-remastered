@@ -16,7 +16,8 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # GitHub's runners rasterize WebGL in software; the e2e suite alone takes about 13 minutes there.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +38,7 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Playwright smoke
-        run: npm run test:e2e
+        run: npm run test:e2e -- --reporter=list
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

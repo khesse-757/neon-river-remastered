@@ -93,7 +93,7 @@ export interface SimConfig {
   readonly scoopSeconds: number;
   /** Progress past the rail at which a fish is gone under the bridge. */
   readonly exitProgress: number;
-  /** False in modes without eels: a rolled eel leaves its place in the stream empty. */
+  /** False in modes without eels: a rolled eel becomes a fish, so its place in the stream is never a gap. */
   readonly eels: boolean;
   /** Outside an S-run, each gap between spawns is the stage period times a factor in this range. */
   readonly spacing: readonly [number, number];
@@ -122,46 +122,46 @@ export const STAGES: readonly StageSpec[] = [
     id: 'still-water',
     name: 'Still Water',
     speed: 1,
-    period: 1.02,
-    run: { fish: [8, 10], period: [0.5, 0.38], crossing: 2.6, eelChance: 0, every: [15, 20] },
+    period: 0.92,
+    run: { fish: [8, 10], period: [0.5, 0.38], crossing: 2.6, eelChance: 0, every: [18, 24] },
     crossing: 4,
     swingMin: 1,
     reversals: 0,
-    eelChance: 0.067,
-    koiChance: 0.08,
-    eelSpacing: 5,
+    eelChance: 0.1,
+    koiChance: 0.07,
+    eelSpacing: 4,
   },
   {
     id: 'quickening',
     name: 'Quickening',
     speed: 1.12,
-    period: 0.88,
-    run: { fish: [9, 11], period: [0.46, 0.34], crossing: 2.3, eelChance: 0.05, every: [16, 22] },
+    period: 0.82,
+    run: { fish: [9, 11], period: [0.46, 0.34], crossing: 2.3, eelChance: 0.05, every: [19, 25] },
     crossing: 3.0,
     swingMin: 0.55,
     reversals: 0.12,
-    eelChance: 0.22,
-    koiChance: 0.08,
+    eelChance: 0.27,
+    koiChance: 0.07,
     eelSpacing: 2,
   },
   {
     id: 'neon-rapids',
     name: 'Neon Rapids',
     speed: 1.254,
-    period: 0.76,
-    run: { fish: [10, 12], period: [0.42, 0.31], crossing: 2.0, eelChance: 0.09, every: [16, 22] },
+    period: 0.74,
+    run: { fish: [10, 12], period: [0.42, 0.31], crossing: 2.0, eelChance: 0.09, every: [19, 25] },
     crossing: 1.8,
     swingMin: 0.4,
     reversals: 0.3,
-    eelChance: 0.4,
-    koiChance: 0.08,
+    eelChance: 0.44,
+    koiChance: 0.07,
     eelSpacing: 1,
   },
   {
     id: 'bank-to-bank',
     name: 'Bank to Bank',
     speed: 1.405,
-    period: 0.54,
+    period: 0.625,
     run: { fish: [10, 13], period: [0.38, 0.29], crossing: 1.8, eelChance: 0.15, every: [15, 20] },
     crossing: 1.15,
     swingMin: 0.4,
@@ -173,12 +173,76 @@ export const STAGES: readonly StageSpec[] = [
   },
 ];
 
+/**
+ * A Normal stage made into a Storm Night one: about half again the eels, and eels in its S-runs
+ * from the start. The runs are a little shorter, looser and rarer, because the 15-lb escape budget
+ * has to last a longer, faster night.
+ */
+const stormy = (stage: StageSpec): StageSpec => ({
+  ...stage,
+  eelChance: Math.min(0.66, stage.eelChance * 1.5),
+  run: {
+    ...stage.run,
+    fish: [8, 10],
+    period: [0.44, 0.34],
+    eelChance: Math.max(0.08, stage.run.eelChance * 1.5),
+    every: [stage.run.every[0] * 1.8, stage.run.every[1] * 1.8],
+  },
+});
+
+const HARD_RUN = { fish: [8, 10], period: [0.44, 0.34], eelChance: 0.2 } as const;
+
+/**
+ * "Storm Night" (Hard): the original's hard table in spirit. It opens at the Normal night's first
+ * speed-up pace and has four speed-ups instead of three. The last two stages are faster than
+ * anything in a Normal night, so they sweep instead of swapping banks.
+ */
+export const HARD_STAGES: readonly StageSpec[] = [
+  stormy(STAGES[1] as StageSpec),
+  stormy(STAGES[2] as StageSpec),
+  { ...stormy(STAGES[3] as StageSpec), period: 0.69, bursts: { share: 0.35, fish: [2, 3] } },
+  {
+    id: 'storm-surge',
+    name: 'Storm Surge',
+    speed: 1.5,
+    period: 0.68,
+    run: { ...HARD_RUN, crossing: 1.65, every: [25, 34] },
+    crossing: 1.15,
+    swingMin: 0.4,
+    reversals: 0.4,
+    eelChance: 0.66,
+    koiChance: 0.07,
+    eelSpacing: 0,
+  },
+  {
+    id: 'black-water',
+    name: 'Black Water',
+    speed: 1.6,
+    period: 0.66,
+    run: { ...HARD_RUN, crossing: 1.5, every: [23, 32] },
+    crossing: 1.1,
+    swingMin: 0.4,
+    reversals: 0.4,
+    eelChance: 0.66,
+    koiChance: 0.07,
+    eelSpacing: 0,
+  },
+];
+
+export const HARD_SPEED_UPS: readonly SpeedUpSpec[] = [
+  { weight: 40, seconds: 30 },
+  { weight: 85, seconds: 60 },
+  { weight: 130, seconds: 90 },
+  { weight: 170, seconds: 118 },
+];
+
 export const DEFAULT_CONFIG: SimConfig = {
   winWeight: 200,
   maxEscaped: 20,
   bannerSeconds: 1.6,
   eels: true,
-  spacing: [0.7, 1.3],
+  // Skewed short: gaps wander, but the longest still leaves a fish in the last third of the river.
+  spacing: [0.6, 1.12],
   travel: 3.0,
   // The current picks up over several seconds: it is still rising while the speed-up's S-run is
   // at the net (the run's fish arrive 3-8 s after the speed-up).
@@ -196,8 +260,8 @@ export const DEFAULT_CONFIG: SimConfig = {
   exitProgress: 1.07,
   stages: STAGES,
   speedUps: [
-    { weight: 40, seconds: 35 },
-    { weight: 90, seconds: 65 },
-    { weight: 140, seconds: 95 },
+    { weight: 45, seconds: 35 },
+    { weight: 97, seconds: 65 },
+    { weight: 148, seconds: 95 },
   ],
 };

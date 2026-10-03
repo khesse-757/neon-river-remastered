@@ -144,20 +144,27 @@ bank, mixed with fast zigzags and eels dropped into the chain.
   time between them; eels and fish arriving within 0.35 s are at least 0.4
   widths apart; eel hitbox radius 0.032 widths; the oracle bot wins every seed
   without touching an eel (§9).
-- **Assist ("the river calms")** and **Endless "Hard River"** are unchanged in
-  intent and are Gate 2.
+- There is no assist (decided 2026-10-03): Zen covers casual play. The old
+  endless "Hard River" idea is Zen's KEEP FISHING after a win.
 
 ### 3.3a Game modes
 
-Chosen on the title screen (a button that cycles), saved, and defined in
-`src/sim/modes.ts` as a name plus a function over the base tuning, so adding a
-mode is adding an entry.
+Chosen on the title screen (three cards, each with a one-line description and
+its best time), saved, and defined in `src/sim/modes.ts` as a name plus a
+function over the base tuning, so adding a mode is adding an entry. Best time,
+best streak and wins are kept per mode.
 
-- **Normal:** the night described above.
-- **Zen:** the same river, runs and speed-ups with no eels. An eel's place in
-  the stream is left empty (never two in a row), so the catch and the pace stay
-  close to Normal's. The 200-lb goal and the 20-lb escape rule still apply.
-- More modes later (Hard River, timed, endless) plug into the same list.
+- **Zen:** the same river with nothing that can end the night. Eels become
+  fish, escapes cost nothing. 200 lb plays the win; KEEP FISHING then carries on
+  with no goal. Clear weather.
+- **Normal:** the night described above. Light rain from the second speed-up,
+  heavier in Bank to Bank, clearing on the win.
+- **Storm Night (Hard):** opens at Normal's first speed-up pace, four speed-ups
+  (top speed 1.6), about half again the eels with eels in S-runs from the start,
+  a 15-lb escape budget, rain and lightning throughout. Unlocked by a Normal win
+  or by ←←→→←←→→ + Enter (eight swipes on touch). Targets: oracle 100%,
+  human-like 15–30%.
+- The Weather switch in Advanced visuals turns all weather off.
 
 ### 3.4 Net feel
 - Net moves along a 1-D rail across the river at the catch zone, drawn as a
@@ -241,7 +248,7 @@ light and sound — never color alone.
   progress toward 200 and an escaped budget of 20 notches; streak badge; phase
   banner as a hanging wooden sign at the start and at each speed-up. Never over the river's play path.
 - Screens: Title (painting + logo, "tap to fish"), Pause, Settings (music, SFX,
-  mute, touch mode, sensitivity, assist, reduced motion, reduce flashing), Win
+  mute, touch mode, sensitivity, reduced motion, reduce flashing), Win
   (time, accuracy, best streak, rating, floating lanterns), Loss (eel / escaped
   variants), Hard River unlocked toast.
 - Safe areas (notches, home indicator), 44 px minimum touch targets, keyboard
@@ -266,7 +273,7 @@ light and sound — never color alone.
 
 - Vite + TypeScript (strict) + three.js, starting from the skills pack scaffold.
 - **Pure simulation core** (`src/sim/`): phase director, emitters, lanes,
-  spline math, catch tests, scoring, assist, seeded RNG. No three.js imports.
+  spline math, catch tests, scoring, seeded RNG. No three.js imports.
   Fully unit-tested with Vitest across many seeds.
 - Rendering, input, UI, audio subscribe to sim events.
 - Scaffold's `__THREE_GAME_TEST_HOOKS__` with real states: `title`,
@@ -288,7 +295,7 @@ code is in scope.
 ## 9. Proof of done
 
 - Unit: sim invariants on 200+ seeds (lanes stay on water, fairness guards,
-  phase timing, win/lose math, assist stacking).
+  phase timing, win/lose math).
 - **Oracle bot:** a planner with perfect information but the real net speed cap
   must reach 200 lb with zero eels on every test seed (proves winnability).
 - **Human-like bot:** reaction delay 220 ms, aim noise, same speed cap; report

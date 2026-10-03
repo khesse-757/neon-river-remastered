@@ -10,6 +10,10 @@ export interface InputOptions {
   /** Any press on the play surface (used to skip the win sequence). */
   readonly onTap: () => void;
   readonly onFirstGesture: () => void;
+  /** A left or right arrow press, or a sideways swipe: the title screen's unlock code listens. */
+  readonly onArrow?: (dir: -1 | 1, touch: boolean) => void;
+  /** Enter, before anything else sees it: true means the title's code took it. */
+  readonly onCode?: () => boolean;
 }
 
 const LEFT_KEYS = new Set(['ArrowLeft', 'KeyA']);
@@ -31,6 +35,7 @@ export class Input {
   private mouseLane = 0.5;
   private touchId: number | null = null;
   private touchX = 0;
+  private swipeFrom: { id: number; x: number; y: number } | null = null;
   private pendingDelta = 0;
   private padStartHeld = false;
   private padConfirmHeld = false;
@@ -61,10 +66,18 @@ export class Input {
         }
         return;
       }
+      // The unlock code ends with Enter, whichever title button has focus.
+      if (e.code === 'Enter' && this.options.onCode?.()) {
+        e.preventDefault();
+        return;
+      }
+      // The title's mode cards and Field Guide button are ordinary buttons: Space presses them.
+      if (e.code === 'Space' && e.target instanceof HTMLButtonElement && /^btn-(mode-|guide)/.test(e.target.id)) return;
       // Buttons in the settings list keep Space and Enter for themselves.
       if (e.target instanceof HTMLButtonElement && e.target.closest('#settings-scroll') && (e.code === 'Space' || e.code === 'Enter'))
         return;
       if (LEFT_KEYS.has(e.code) || RIGHT_KEYS.has(e.code)) {
+        if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') this.options.onArrow?.(e.code === 'ArrowLeft' ? -1 : 1, false);
         this.held.add(e.code);
         this.device = 'keys';
         e.preventDefault();
@@ -114,8 +127,19 @@ export class Input {
       if (this.touchMode === 'absolute') this.mouseLane = this.laneAt(e.clientX);
       this.device = 'touch';
     });
+    // Swipes are watched on the whole window, so one that starts on a title button still counts.
+    on('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse') this.swipeFrom = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    });
     const release = (e: PointerEvent): void => {
       if (e.pointerId === this.touchId) this.touchId = null;
+      const from = this.swipeFrom;
+      if (!from || from.id !== e.pointerId) return;
+      this.swipeFrom = null;
+      if (e.type !== 'pointerup') return;
+      const dx = e.clientX - from.x;
+      // A clearly sideways stroke counts as an arrow.
+      if (Math.abs(dx) > 36 && Math.abs(dx) > Math.abs(e.clientY - from.y) * 2) this.options.onArrow?.(dx < 0 ? -1 : 1, true);
     };
     on('pointerup', release);
     on('pointercancel', release);

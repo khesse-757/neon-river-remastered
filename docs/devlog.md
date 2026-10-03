@@ -334,3 +334,80 @@ that speed up under your net.
   left holes: late in the night half the stream is eels, and the first version
   had 6-second stretches of empty river. Now an eel's place is left empty only
   if the place before it was not.
+
+## Gate 2: feature complete (2026-10-03)
+
+### Lean mode
+
+Kyle's first instruction for this gate was about process, not the game: verification had been eating
+time and tokens. The rules now: `npm run check` and the smoke test per change, one screenshot of the
+screen that changed, one playtester run when balance code changes, one reviewer pass at the end. The
+playtester agent moved to a smaller model, because it only runs a script and reads numbers.
+
+### Closing the lulls without making a metronome
+
+Round 3b's S-runs left about 7 s a night with nothing near the net. Kyle's call: 2 s at most, keep
+the runs, fill between them with an uneven trickle.
+
+A gap is "empty" when it is longer than the time a fish spends in the last third of the river (about
+1.05 s at the opening speed). The old gaps were the stage period times 0.7-1.3, so nearly half of
+Still Water's gaps were too long. The fix is a skew, not a clamp: period times 0.6-1.12, with periods
+set so the longest gap just fits. Gaps still wander by a factor of almost two.
+
+That added about a quarter more fish to the first three stages. First result: empty time 1.0 s, but
+the night ended at 1:58 and the speed-ups came at 25 / 52 / 81 s. Paying it back took four small
+changes (a few more eels early, koi 8% -> 7%, runs a few seconds further apart, speed-ups at
+45 / 97 / 148 lb). After: empty time 1.1 s, speed-ups 0:30 / 1:00 / 1:30, median win 2:02.
+
+### Storm Night: the first table was unwinnable
+
+The spec: start at the first speed-up's pace, four speed-ups, half again the eels, 15 lb of escapes,
+winnable by a perfect player, 15-30% for a human-like one. The literal version (+12% speed at every
+step up to 1.76, full S-runs, bank swaps throughout) scored oracle 80% and human-like 0 out of 100.
+
+The reason was already in Normal's numbers: the human-like bot lets about 13 lb escape in a winning
+Normal night, most of it in S-runs and bank swaps. A 15-lb budget over a longer, faster night has no
+room for that. Easing one thing at a time did almost nothing (0-7%): no swaps, slower sweeps, fewer
+eels, sparser fish, even a 20-lb budget. It took all of them together, aimed at the leaks: runs of
+8-10 fish with looser gaps and about half as often, no bank swaps in the two new stages, top speeds
+of 1.5 and 1.6 instead of 1.57 and 1.76. Result: oracle 100%, human-like 29%, median win 2:27.
+
+### Zen, properly
+
+Zen used to leave an eel's place empty and keep the 20-lb rule. Now eels become fish, nothing can end
+the night, and 200 lb plays the win and then offers KEEP FISHING. The sim change is three lines: a
+`keepFishing()` that puts a won night back in play with the win switched off.
+
+### Looks without new art
+
+The four looks (Night, Vivid Neon, Ukiyo-e, Moonlight) are numbers in the final pass that already
+graded the picture: palette-blend strength, saturation, a tint, a wash toward a paper tone, and how
+hard neon and bloom push. The pixel UI is drawn after that pass, so menus keep their colors.
+
+### Rain that could not be seen
+
+The first rain was two soft dots per drop. In the screenshot there was no rain at all: soft round
+particles a texel wide, three texels apart, read as faint specks. Six overlapping dots along the
+fall line read as a streak. The particle system only has round dots, so a streak is a short row of
+them.
+
+### The Field Guide was built in parallel
+
+The gallery is isolated enough (its own chunk, its own small renderer) that a second agent built it
+in a separate worktree against a written contract while the sim and menus changed underneath. It
+merged with no conflicts. It adds 7.9 kB gzip, loaded only when the button is pressed.
+
+### After Kyle's Gate 2 notes
+
+- Normal now tells the night's story in weather: light rain from the second speed-up, heavier in
+  Bank to Bank, clearing on the win. Zen stays clear.
+- Rain is two generated loops (light and heavy) crossfaded by one "how hard is it raining" number,
+  and thunder is three generated rolls. Two of the thunder takes came back almost silent (peaks of
+  -33 and -27 dBFS) and were raised by 29 and 23 dB in normalization; nobody has listened yet.
+- "Koi stay gold in every look" turned out to be one line in the grade: pixels that are strongly
+  warm (red well above blue, and above green) skip the desaturation and tint. The lantern keeps its
+  color for free.
+- The bluegill's dorsal fin was a single upright triangle with a sideways normal, so on the
+  turntable one side was always unlit. In the river it is seen from above and nobody noticed. It is
+  now two faces a hair apart, each lit as if it leaned.
+- Assist is out of the design. Zen is the casual mode.

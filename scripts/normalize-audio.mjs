@@ -25,6 +25,12 @@ const JOBS = [
   { in: `${SRC}/koto-pluck-raw.mp3`, out: 'public/audio/sfx/koto-pluck.mp3', peak: -3 },
   { in: `${SRC}/chime-raw.mp3`, out: 'public/audio/sfx/chime.mp3', peak: -6 },
   { in: 'public/assets/original/water_net.wav', out: 'public/audio/sfx/net.mp3', peak: -3 },
+  // Weather (Gate 2): two rain layers that crossfade with the night, and three thunder rolls.
+  { in: `${SRC}/rain-light-raw.mp3`, out: 'public/audio/ambience/rain-light-loop.mp3', lufs: -29 },
+  { in: `${SRC}/rain-heavy-raw.mp3`, out: 'public/audio/ambience/rain-heavy-loop.mp3', lufs: -25 },
+  { in: `${SRC}/thunder-1-raw.mp3`, out: 'public/audio/sfx/thunder-1.mp3', peak: -4 },
+  { in: `${SRC}/thunder-2-raw.mp3`, out: 'public/audio/sfx/thunder-2.mp3', peak: -4 },
+  { in: `${SRC}/thunder-3-raw.mp3`, out: 'public/audio/sfx/thunder-3.mp3', peak: -4 },
 ];
 
 const analyse = (file, filter) => {

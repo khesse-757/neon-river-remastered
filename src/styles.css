@@ -180,3 +180,73 @@ body {
 .hide-debug #path-editor {
   display: none !important;
 }
+
+/* Field Guide */
+#gallery {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  background: #030911;
+  outline: none;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#gallery .gal-stage {
+  position: absolute;
+  top: env(safe-area-inset-top, 0px);
+  right: env(safe-area-inset-right, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
+  left: env(safe-area-inset-left, 0px);
+}
+
+#gallery canvas {
+  position: absolute;
+  display: block;
+}
+
+#gallery .gal-ui {
+  top: 0;
+  left: 0;
+}
+
+#gallery .gal-ui,
+#gal-sprite {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  pointer-events: none;
+}
+
+/* The turntable is smooth 3D at device pixels inside the pixel frame. */
+#gal-model {
+  cursor: grab;
+  touch-action: none;
+}
+
+#gal-model:active {
+  cursor: grabbing;
+}
+
+#gal-model:focus-visible {
+  outline: var(--texel) solid #8ff8ff;
+  outline-offset: calc(var(--texel) * -1);
+}
+
+#gallery [hidden] {
+  display: none;
+}
+
+#gallery button:disabled {
+  cursor: default;
+}
+
+#gallery .gal-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

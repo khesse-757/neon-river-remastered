@@ -10,7 +10,10 @@ import { SceneRenderer, type ActorResolution, type FrameView, type WaterLight } 
 import { oracleIntent } from '../sim/bots/oracle';
 import { trackerIntent } from '../sim/bots/tracker';
 import { DEFAULT_CONFIG, STAGES, type FishKind, type SimConfig } from '../sim/config';
+import type { GalleryHandle } from '../gallery/Gallery';
+import { lookById, VisualStore, type VisualSettings } from '../render/visuals';
 import { configFor, MODES, modeById, type GameMode } from '../sim/modes';
+import { formatTime, loadRecords, modeRecord, recordNight, saveRecords, type Records } from './records';
 import type { NetIntent } from '../sim/net';
 import { River, type RiverData } from '../sim/river';
 import { createRng, type Rng } from '../sim/rng';
@@ -31,7 +34,8 @@ const DEFAULT_GRID: readonly [number, number] = [216, 387];
 
 /** The win sequence: a slow-motion beat, then the celebration, then the results card. */
 const WIN_SECONDS = 6;
-const UNLOCK_STORE = 'neonriver2_hard_river';
+/** Left, left, right, right, left, left, right, right (then Enter, or just the swipes on touch) opens Storm Night. */
+const UNLOCK_CODE: readonly number[] = [-1, -1, 1, 1, -1, -1, 1, 1];
 const MODE_STORE = 'neonriver2_mode';
 const PAPER_LANTERN = ['.###.', '#####', '#.#.#', '#####', '#.#.#', '#####', '.###.', '..#..'];
 const GEAR = ['...#.#...', '.#.###.#.', '..#####..', '###...###', '.##...##.', '###...###', '..#####..', '.#.###.#.', '...#.#...'];
@@ -43,8 +47,9 @@ const EMITTER_READ = 0.24;
 const TOSS_TIME = 0.5;
 /** A weight pop rises and fades where the fish was caught. */
 const POP_SECONDS = 0.75;
-/** How long a speed-up's rush of current streaks lasts. */
-const SURGE_SECONDS = 1.6;
+/** How long a speed-up's rush of current streaks, and the shimmer that runs down the river with it, lasts. */
+const SURGE_SECONDS = 2;
+const SHAKE_SECONDS = 0.3;
 
 const C = {
   eel: color('#39e6ee'),
@@ -60,6 +65,7 @@ const C = {
   fireA: color('#ff5fd0'),
   fireB: color('#39e6ee'),
   fireC: color('#ffd98a'),
+  rain: color('#bfe6f0'),
 };
 
 /** A caught fish between the net and the basket. */
@@ -147,6 +153,28 @@ export class Game {
   private readonly lanterns: { x: number; y: number; vx: number; vy: number; age: number; phase: number }[] = [];
   private settingsOpen = false;
   private reduceFlashing = false;
+  readonly visuals = new VisualStore();
+  private records: Records = loadRecords();
+  /** A night set up by a test hook: it is not written into the player's records. */
+  private hookNight = false;
+  /** Storm Night was opened by the win just shown. */
+  private justUnlocked = false;
+  /** A test hook opened the locked modes for this visit (never saved). */
+  private hookUnlock = false;
+  private code: number[] = [];
+  private gallery: GalleryHandle | null = null;
+  private galleryLoading = false;
+  private galleryTexel = 0;
+  private fps = 60;
+  /** How hard it is raining now (0 none, ~0.7 light, 1.7 heavy); eases toward what the night calls for. */
+  private rain = 0;
+  private rainTimer = 0;
+  private ringTimer = 0;
+  /** Seconds until the next lightning; seconds into the current one (0 = none); seconds until its thunder. */
+  private boltIn = 6;
+  private bolt = 0;
+  private thunderIn = 0;
+  private shake = 0;
   private banner = 0;
   private bannerText = '';
   /** Seconds left of a speed-up's surge. */
@@ -179,13 +207,19 @@ export class Game {
     this.gameMode = modeById(MODES.some((m) => m.id === options.mode) ? options.mode : savedMode);
     this.config = this.gameMode.apply(DEFAULT_CONFIG);
     this.audio = new AudioBus(options.theme);
-    this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    this.reduceFlashing = this.reducedMotion;
+    this.reducedMotion = this.visuals.settings.reduceMotion;
+    this.reduceFlashing = this.visuals.settings.reduceFlashing;
+    this.visuals.onChange = () => this.applyVisuals();
+    // A locked mode cannot be the saved or linked choice.
+    if (this.locked(this.gameMode)) this.gameMode = modeById(null);
+    this.config = this.gameMode.apply(DEFAULT_CONFIG);
     this.overlay = new Overlay({
       start: () => this.confirm(),
       resume: () => this.closePanel(),
       home: () => this.goHome(),
-      mode: () => this.setGameMode((MODES[(MODES.indexOf(this.gameMode) + 1) % MODES.length] as GameMode).id),
+      keep: () => this.keepFishing(),
+      guide: () => void this.openGallery(),
+      ...Object.fromEntries(MODES.map((m) => [`mode-${m.id}`, () => this.setGameMode(m.id)])),
       retry: () => this.confirm(),
       settings: () => this.toggleSettings(),
       mute: () => {
@@ -196,8 +230,7 @@ export class Game {
       },
     });
     this.overlay.setMuted(this.audio.isMuted);
-    this.overlay.setGameMode(this.gameMode.name);
-    this.panel = new SettingsPanel(this.audio);
+    this.panel = new SettingsPanel(this.audio, this.visuals);
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config });
     this.installTestHooks();
     this.ready = this.load(grid[0], grid[1]);
@@ -225,16 +258,105 @@ export class Game {
   /** Choose how the next night is played, and remember it. Only from the title screen. */
   setGameMode(id: string): void {
     if (this.mode !== 'title' && this.mode !== 'loading') return;
+    if (this.locked(modeById(id))) {
+      this.audio.miss();
+      return;
+    }
     this.gameMode = modeById(id);
     // The mode reshapes the base tuning; live dev tweaks (tune panel, net feel) carry over.
     this.config = { ...configFor(this.gameMode.id), tune: this.config.tune, net: this.config.net };
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config });
-    this.overlay.setGameMode(this.gameMode.name);
     this.audio.uiTick();
     try {
       localStorage.setItem(MODE_STORE, this.gameMode.id);
     } catch {
       /* storage unavailable */
+    }
+  }
+
+  private locked(mode: GameMode): boolean {
+    return mode.lockedBlurb !== undefined && !this.records.hardUnlocked && !this.hookUnlock;
+  }
+
+  /** Storm Night opens: a Normal win, or the code. */
+  private unlockHard(): void {
+    this.records.hardUnlocked = true;
+    saveRecords(this.records);
+  }
+
+  /** The title screen's code: arrows (then Enter) or swipes. */
+  private onArrow(dir: -1 | 1, touch: boolean): void {
+    if (this.mode !== 'title' || this.gallery || this.settingsOpen) return;
+    this.code.push(dir);
+    if (this.code.length > UNLOCK_CODE.length) this.code.shift();
+    if (touch) this.tryCode();
+  }
+
+  private tryCode(): boolean {
+    const hit = this.code.length === UNLOCK_CODE.length && this.code.every((d, i) => d === UNLOCK_CODE[i]);
+    if (!hit || this.records.hardUnlocked) return false;
+    this.code = [];
+    this.unlockHard();
+    this.setGameMode('hard');
+    this.audio.speedUpSting(2);
+    this.buzz([20, 40, 20]);
+    return true;
+  }
+
+  /** Push the picture settings to the renderer and the effects that read them. */
+  private applyVisuals(): void {
+    const v = this.visuals.settings;
+    this.reducedMotion = v.reduceMotion;
+    this.reduceFlashing = v.reduceFlashing;
+    this.view?.applyVisuals(v, lookById(v.look));
+  }
+
+  /** How many of `n` cosmetic particles the density setting lets through. */
+  private some(n: number): number {
+    return Math.round(n * this.visuals.settings.particles);
+  }
+
+  /** After a Zen win: carry on with the same river, with nothing left to win or lose. */
+  private keepFishing(): void {
+    if (this.mode !== 'over' || this.sim.state.status !== 'won' || this.gameMode.losable) return;
+    this.sim.keepFishing();
+    this.win = 0;
+    this.leaps.length = 0;
+    this.lanterns.length = 0;
+    this.settingsOpen = false;
+    this.audio.stopCue();
+    this.audio.uiTick();
+    this.input?.reset();
+    this.setMode('playing');
+  }
+
+  /** The Field Guide: a separate chunk, fetched the first time it is opened. */
+  private async openGallery(): Promise<void> {
+    if (this.mode !== 'title' || this.gallery || this.galleryLoading) return;
+    this.galleryLoading = true;
+    this.audio.uiTick();
+    try {
+      const { openGallery } = await import('../gallery/Gallery');
+      if (this.mode !== 'title' || this.gallery) return;
+      const c = this.records.catches;
+      this.settingsOpen = false;
+      this.galleryTexel = this.texelCss();
+      this.gallery = openGallery({
+        host: this.overlay.host,
+        texel: this.galleryTexel,
+        ramp: this.view.assets.ramp,
+        counts: { bluegill: c.bluegill, koi: c.koi, eel: c.eel, net: c.bluegill + c.koi },
+        reducedMotion: this.reducedMotion,
+        tick: () => this.audio.uiTick(),
+        onClose: () => {
+          this.gallery = null;
+          this.setMode('title');
+        },
+      });
+      this.panel.hide();
+      this.overlay.hideAll();
+    } finally {
+      this.galleryLoading = false;
     }
   }
 
@@ -265,6 +387,8 @@ export class Game {
   private goHome(): void {
     if (this.mode !== 'paused' && this.mode !== 'over') return;
     this.audio.uiTick();
+    // Fish netted on an unfinished night still count in the Field Guide.
+    saveRecords(this.records);
     // A fresh river behind the title, with nothing left over from the night just ended.
     this.startRun();
     this.setMode('title');
@@ -319,7 +443,10 @@ export class Game {
       onFirstGesture: () => {
         void this.audio.unlock().then(() => this.audio.startLoops());
       },
+      onArrow: (dir, touch) => this.onArrow(dir, touch),
+      onCode: () => this.mode === 'title' && !this.gallery && !this.settingsOpen && this.tryCode(),
     });
+    this.applyVisuals();
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.mode === 'playing' && this.win === 0) this.setMode('paused');
       // A hidden tab goes quiet (unless that setting is off); a paused game keeps its beds so the
@@ -339,6 +466,7 @@ export class Game {
     const now = performance.now();
     const elapsed = now - this.lastFrameAt;
     this.lastFrameAt = now;
+    if (elapsed > 0 && elapsed < 500) this.fps += (1000 / elapsed - this.fps) * 0.08;
     if (this.settleFrames > 0 || document.hidden || elapsed > 500) {
       this.settleFrames = Math.max(0, this.settleFrames - 1);
       return;
@@ -359,6 +487,8 @@ export class Game {
       this.settingsOpen = false;
       return;
     }
+    if (this.gallery) return;
+    if (this.mode === 'title' && this.tryCode()) return;
     if (this.win > 0 && this.mode === 'playing') this.skipWin();
     else if (this.mode === 'title' || this.mode === 'over') {
       this.settingsOpen = false;
@@ -379,7 +509,14 @@ export class Game {
     } else if (this.mode === 'paused') this.setMode('playing');
   }
 
-  private startRun(startStage = 0): void {
+  private startRun(startStage = 0, hooked = false): void {
+    this.hookNight = hooked;
+    this.justUnlocked = false;
+    this.code = [];
+    this.bolt = 0;
+    this.thunderIn = 0;
+    this.boltIn = 5;
+    this.shake = 0;
     // Wall-clock time only picks the seed; the run itself stays deterministic for that seed.
     if (!this.seedPinned) this.seed = (Date.now() + this.runCount * 7919) >>> 0;
     this.runCount += 1;
@@ -435,6 +572,12 @@ export class Game {
   private frame(delta: number): void {
     this.frameCount += 1;
     if (this.view.resize()) this.overlay.setTexel(this.view.layout.scale / (window.devicePixelRatio || 1));
+    if (this.gallery) {
+      // The Field Guide covers the screen and draws itself; the river waits behind it.
+      if (this.texelCss() !== this.galleryTexel) this.gallery.resize((this.galleryTexel = this.texelCss()));
+      this.publishDiagnostics();
+      return;
+    }
     const dt = this.frozen ? 0 : delta;
     const live = this.mode === 'playing' || (this.mode === 'over' && !this.frozen);
 
@@ -506,6 +649,7 @@ export class Game {
       case 'catch': {
         const p = this.fishPoint(event.fish);
         const koi = event.fish.kind === 'koi';
+        if (!this.hookNight) this.records.catches[event.fish.kind] += 1;
         this.audio.catch(event.streak, koi);
         // Mirror onto the rising half at the same height, so the lift never jumps.
         if (this.scoop === 0) this.scoop = 0.0001;
@@ -513,7 +657,7 @@ export class Game {
         this.bulge = 1;
         this.drip = 0.9;
         ripples.inject(p.x, p.y, koi ? 5 : 4, koi ? 0.9 : 0.7);
-        for (let i = 0; i < (koi ? 14 : 9); i++) {
+        for (let i = 0; i < this.some(koi ? 14 : 9); i++) {
           particles.emit({
             x: p.x + (this.fx.next() - 0.5) * 7,
             y: p.y - 1,
@@ -534,7 +678,7 @@ export class Game {
         const p = this.fishPoint(event.fish);
         this.audio.miss();
         ripples.inject(p.x, p.y, 3, 0.5);
-        for (let i = 0; i < 4; i++)
+        for (let i = 0; i < this.some(4); i++)
           particles.emit({
             x: p.x,
             y: p.y,
@@ -558,6 +702,8 @@ export class Game {
         this.hitstop = 0.12;
         this.shock = 0.0001;
         this.fry = 0.0001;
+        if (!this.hookNight) this.records.catches.eel += 1;
+        if (this.visuals.settings.shake && !this.reducedMotion) this.shake = SHAKE_SECONDS;
         // Lightning runs up the pole to the fisherman's hands.
         const net = this.gridPoint(1, this.sim.state.net.lane);
         const grip = this.view.toTexel(this.view.grip);
@@ -573,20 +719,28 @@ export class Game {
         // The eel loss plays out longer: the shock runs to the basket before the screen comes up.
         this.lossTimer = event.cause === 'eel' ? 2.1 : 0.9;
         this.lossCue = event.cause === 'eel' ? 1.1 : 0.15;
+        this.endNight(false);
         break;
       case 'win':
         this.lossCause = null;
         this.win = 0.0001;
         this.audio.winFanfare();
-        // Hard River is earned on a night with eels in it.
-        if (this.gameMode.unlocks)
-          try {
-            localStorage.setItem(UNLOCK_STORE, '1');
-          } catch {
-            /* storage unavailable */
-          }
+        this.endNight(true);
         break;
     }
+  }
+
+  /** Write the finished night into the records: best time, best streak and wins for its mode. */
+  private endNight(won: boolean): void {
+    if (this.hookNight) return;
+    const s = this.sim.state;
+    recordNight(this.records, this.gameMode.id, { won, time: s.time, bestStreak: s.bestStreak });
+    // Storm Night is earned on a Normal night.
+    if (won && this.gameMode.unlocks && !this.records.hardUnlocked) {
+      this.records.hardUnlocked = true;
+      this.justUnlocked = true;
+    }
+    saveRecords(this.records);
   }
 
   private sparks(x: number, y: number, count: number, life = 0.2): void {
@@ -623,7 +777,10 @@ export class Game {
     this.surge = Math.max(0, this.surge - dt);
     const rush = this.surge / SURGE_SECONDS;
     // Reduced motion: no streaks at all; the sign and the stinger announce the speed-up.
-    const streaks = this.mode === 'playing' && this.win === 0 && !this.reducedMotion ? state.stageIndex * 4 + 36 * rush * rush : 0;
+    const streaks =
+      this.mode === 'playing' && this.win === 0 && !this.reducedMotion
+        ? (state.stageIndex * 4 + 46 * rush * rush) * (0.4 + 0.6 * this.visuals.settings.particles)
+        : 0;
     const railSize = this.river.screenAt(1, 0.5).scale;
     this.streakTimer += dt * streaks;
     while (this.streakTimer >= 1) {
@@ -645,7 +802,8 @@ export class Game {
           life: 0.5 - k * 0.05,
           color: C.shimmer,
           size: 1.2 + rel * 1.6 - k * 0.15,
-          glow: 0.6 - k * 0.06,
+          // Brighter during the rush itself, still under the bloom threshold: faster water, not sparks.
+          glow: 0.6 + 0.25 * rush - k * 0.06,
         });
     }
 
@@ -686,6 +844,8 @@ export class Game {
     }
 
     if (this.shock > 0) this.shock += dt;
+    this.shake = Math.max(0, this.shake - dt);
+    this.updateWeather(dt);
     if (this.lossCue > 0) {
       this.lossCue -= dt;
       if (this.lossCue <= 0) this.audio.lossPhrase();
@@ -743,7 +903,8 @@ export class Game {
     // Fireflies over the banks.
     this.fireflyTimer -= dt;
     if (this.fireflyTimer <= 0) {
-      this.fireflyTimer = 0.5 + this.fx.next() * 0.6;
+      this.fireflyTimer = (0.5 + this.fx.next() * 0.6) / Math.max(0.05, this.visuals.settings.particles);
+      if (this.visuals.settings.particles === 0) return;
       const left = this.fx.next() < 0.55;
       const gw = this.view.assets.gridW;
       const gh = this.view.assets.gridH;
@@ -759,6 +920,67 @@ export class Game {
         glow: 2.2,
       });
     }
+  }
+
+  /** Storm Night's weather: steady light rain, rings on the water, and lightning with its thunder. */
+  private updateWeather(dt: number): void {
+    const on = this.visuals.settings.weather;
+    const storm = this.gameMode.weather === 'storm' && on;
+    // Normal tells the night's story: light rain from the second speed-up, heavier in the last
+    // stage, clearing as the win is celebrated. Storm Night rains from the title screen on.
+    const stage = this.sim.state.stageIndex;
+    const story = this.mode === 'title' || this.win > 0 ? 0 : stage >= 3 ? 1.7 : stage >= 2 ? 0.7 : 0;
+    const target = !on ? 0 : storm ? 1 : this.gameMode.weather === 'story' ? story : 0;
+    this.rain += (target - this.rain) * (1 - Math.exp(-dt / 1.8));
+    if (this.rain < 0.01 && target === 0) this.rain = 0;
+    if (target > 0) this.audio.loadWeather();
+    this.audio.setRain(this.rain);
+    if (!storm) this.bolt = 0;
+    if (this.rain === 0) return;
+    const { particles, ripples, layout } = this.view;
+    // Rain: short streaks across the whole screen, gutters included. Reduced motion keeps only the rings.
+    this.rainTimer += dt * (this.reducedMotion ? 0 : 90 * this.rain * this.visuals.settings.particles);
+    while (this.rainTimer >= 1) {
+      this.rainTimer -= 1;
+      const x = -layout.originX + this.fx.next() * (layout.targetW + 30);
+      const y = -layout.originY - 6 + this.fx.next() * layout.targetH * 0.95;
+      const life = 0.22 + this.fx.next() * 0.14;
+      // Overlapping dots in a slanted line read as one streak.
+      for (let k = 0; k < 6; k++)
+        particles.emit({ x: x + k * 0.14, y: y - k * 1.05, vx: -30, vy: 230, life, color: C.rain, size: 1.5, glow: 1 - k * 0.12 });
+    }
+    this.ringTimer += dt * 9 * this.rain;
+    while (this.ringTimer >= 1) {
+      this.ringTimer -= 1;
+      const p = this.gridPoint(0.25 + this.fx.next() * 0.75, this.fx.next());
+      ripples.inject(p.x, p.y, 1.6, 0.22);
+    }
+    if (!storm) return;
+    // Lightning: a double flicker, or one slow soft glow when flashing is reduced.
+    if (this.bolt > 0) {
+      this.bolt += dt;
+      if (this.bolt > 1) this.bolt = 0;
+    } else {
+      this.boltIn -= dt;
+      if (this.boltIn <= 0) {
+        this.boltIn = 8 + this.fx.next() * 8;
+        this.bolt = 0.0001;
+        this.thunderIn = 0.5 + this.fx.next() * 0.9;
+      }
+    }
+    if (this.thunderIn > 0) {
+      this.thunderIn -= dt;
+      if (this.thunderIn <= 0 && this.mode === 'playing') this.audio.thunder();
+    }
+  }
+
+  /** How bright the lightning is right now, 0..1. */
+  private lightning(): number {
+    const t = this.bolt;
+    if (t <= 0) return 0;
+    if (this.reduceFlashing) return 0.12 * Math.sin(Math.PI * Math.min(1, t));
+    const flicker = t < 0.07 ? 1 : t < 0.15 ? 0.15 : t < 0.24 ? 0.75 : Math.max(0, 0.75 * (1 - (t - 0.24) / 0.4));
+    return 0.5 * flicker;
   }
 
   /** An eel ruins the catch: arcs jump from the net to the basket and the fish in it fry. */
@@ -866,7 +1088,7 @@ export class Game {
         const cy = (0.03 + this.fx.next() * 0.1) * gridH;
         const tint = [C.fireA, C.fireB, C.fireC][Math.floor(this.fx.next() * 3)] ?? C.fireA;
         const flashy = !this.reduceFlashing;
-        for (let i = 0; i < 28; i++) {
+        for (let i = 0; i < Math.max(14, this.some(28)); i++) {
           const a = (i / 14) * Math.PI * 2;
           const v = (i < 14 ? 16 : 9) + this.fx.next() * 4;
           particles.emit({
@@ -1053,7 +1275,11 @@ export class Game {
               : 0.2
         : 1;
     const cheer = this.win > 0.7 && !this.reducedMotion;
-    const flash = shock > 0 && !this.reducedMotion ? Math.max(0, 1 - shock * 5) : 0;
+    const flash = Math.max(shock > 0 && !this.reducedMotion ? Math.max(0, 1 - shock * 5) : 0, this.lightning());
+    // The speed-up's shimmer runs from the far bend to the net over the surge.
+    const surgeT = 1 - this.surge / SURGE_SECONDS;
+    const surgeOn = this.surge > 0 && !this.reducedMotion && this.mode !== 'title';
+    const shakeK = (this.shake / SHAKE_SECONDS) * 2;
     const flicker = 0.9 + 0.1 * Math.sin(this.time * 13) * Math.sin(this.time * 7.3);
     const dim = this.mode === 'title' ? 0.3 : this.mode === 'paused' ? 0.45 : this.mode === 'over' ? 0.5 : 0;
 
@@ -1105,7 +1331,9 @@ export class Game {
           ? (this.reduceFlashing ? 0.25 : 0.25 + 0.75 * Math.max(0, 1 - (this.win - 0.7) / 1.4) ** 2) *
             THREE.MathUtils.smoothstep(this.win, 0.5, 0.8)
           : 0,
-      drift: this.reducedMotion ? 0 : (netLane - 0.5) * 3 + Math.sin(this.time * 0.13) * 1.2,
+      drift: this.reducedMotion || !this.visuals.settings.drift ? 0 : (netLane - 0.5) * 3 + Math.sin(this.time * 0.13) * 1.2,
+      surge: { front: surgeT * 1.15, strength: surgeOn ? Math.sin(Math.PI * Math.min(1, surgeT)) : 0 },
+      shake: { x: Math.round(Math.sin(this.time * 90) * shakeK), y: Math.round(Math.cos(this.time * 71) * shakeK) },
       // He jumps on the fanfare's beat.
       hop: cheer && Math.floor(this.time * 5.33) % 2 === 0 ? 3 : 0,
     };
@@ -1122,44 +1350,72 @@ export class Game {
     const safe = this.safeTexels();
     const bottom = targetH - safe.bottom;
     const gutter = bottom - (originY + gridH);
-    const w = 100;
-    const h = 23;
+    // The HUD scale setting magnifies the tablet and its text by a whole number, so pixels stay square.
+    const k = this.visuals.settings.hudScale;
+    const w = 100 * k;
+    const h = 23 * k;
     const inGutter = gutter >= h + 6;
     const controlSize = Math.max(13, Math.ceil(44 / this.texelCss()));
     const corner = this.cornerTexels();
     // The tablet never covers the painting if it can help it. First choice: centred just below
     // it, as on a phone. A wide window with no room below: in the left gutter, beside the bridge,
-    // level with the foot of the painting. Only a screen with no gutter at all puts it top-left
-    // under the buttons, over trees and sky (the cobbles belong to the basket and the fisherman).
+    // level with the foot of the painting. A screen with neither (a tablet in portrait): on the
+    // same row as the gear and mute buttons, to their right, over the sky; the stage sign then
+    // hangs below that row instead of beside it.
     const beside = !inGutter && originX >= w + 8;
-    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : beside ? originX - w - 4 : corner.x;
+    const rowX = corner.x + controlSize * 2 + 6;
+    const inRow = !inGutter && !beside && rowX + w + 26 <= targetW;
+    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : beside ? originX - w - 4 : inRow ? rowX : corner.x;
     const y = inGutter
       ? originY + gridH + Math.floor((gutter - h) / 2)
       : beside
         ? Math.min(bottom, originY + gridH) - h - 4
-        : corner.y + controlSize + 5;
+        : inRow
+          ? corner.y
+          : corner.y + controlSize + 5;
     // The tablet stays calm: the number changes, nothing lights up (Kyle found a pulse distracting).
     v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
-    v.panel('hud-lip', x, y, w, 1, show ? '#5f696c' : null);
-    v.label('hud-caught-label', show ? 'CAUGHT' : '', x + 5, y + 3, '#a1987a');
-    v.label('hud-caught', show ? `${s.caught}/${this.config.winWeight}` : '', x + 5, y + 12, '#9ccbcf');
-    v.label('hud-escaped-label', show ? 'ESCAPED' : '', x + 53, y + 3, '#a1987a');
-    const danger = s.escaped >= this.config.maxEscaped - 6;
-    v.label('hud-escaped', show ? `${s.escaped}/${this.config.maxEscaped}` : '', x + 53, y + 12, danger ? '#ff9933' : '#9ccbcf');
+    v.panel('hud-lip', x, y, w, k, show ? '#5f696c' : null);
+    v.uiZoom = k;
+    // A night that cannot be lost has no limits to show; after a Zen win the count just carries on.
+    const losable = Number.isFinite(this.config.maxEscaped);
+    v.label('hud-caught-label', show ? 'CAUGHT' : '', x + 5 * k, y + 3 * k, '#a1987a');
+    v.label(
+      'hud-caught',
+      show ? (s.endless ? `${s.caught} LB` : `${s.caught}/${this.config.winWeight}`) : '',
+      x + 5 * k,
+      y + 12 * k,
+      '#9ccbcf',
+    );
+    v.label('hud-escaped-label', show ? 'ESCAPED' : '', x + 53 * k, y + 3 * k, '#a1987a');
+    const danger = losable && s.escaped >= this.config.maxEscaped - 6;
+    v.label(
+      'hud-escaped',
+      show ? (losable ? `${s.escaped}/${this.config.maxEscaped}` : `${s.escaped}`) : '',
+      x + 53 * k,
+      y + 12 * k,
+      danger ? '#ff9933' : '#9ccbcf',
+    );
+    // The streak sits to the right of the tablet, or above it where there is no room (left gutter, 2X on a phone).
+    const above = beside || x + w + 4 + 26 * k > targetW;
     v.label(
       'hud-streak',
       show && this.mode !== 'over' && s.streak >= 3 ? `x${s.streak}` : '',
-      beside ? x + 5 : x + w + 4,
-      beside ? y - 11 : y + 8,
+      above ? x + 5 * k : x + w + 4,
+      above ? y - 11 * k : y + 8 * k,
       '#ffd98a',
     );
+    v.uiZoom = 1;
+    v.label('fps', this.visuals.settings.showFps ? `${Math.round(this.fps)} FPS` : '', targetW - 3, safe.top + 3, '#99c8cd', 'right');
 
     // Phase banner: a hanging wooden sign over the sky, clear of the river's path.
     const banner = this.banner > 0 && this.mode === 'playing' && !this.settingsOpen;
     const bw = this.bannerText.length * 6 + 14;
     const bx = Math.floor(originX + gridW / 2 - bw / 2);
-    const by = originY + Math.floor(gridH * 0.035);
+    let by = originY + Math.floor(gridH * 0.035);
+    // Where the score tablet shares the top of the screen, the sign hangs below it.
+    if (!inGutter && bx < x + w + 30 && bx + bw > x - 2 && by < y + h + 3 && by + 14 > y) by = y + h + 4;
     v.panel('banner-edge', bx - 1, by - 1, bw + 2, 15, banner ? '#030911' : null);
     v.panel('banner-body', bx, by, bw, 13, banner ? '#834433' : null);
     v.label('banner-text', banner ? this.bannerText : '', originX + gridW / 2, by + 3, '#ffd98a', 'center');
@@ -1208,7 +1464,7 @@ export class Game {
       v.panel(`${id}-strip`, cx - Math.ceil(tw / 2) - 3, y - 2, tw + 6, 11, on ? '#030911' : null, 11);
     };
     // `dx` moves the button's centre off the middle (two buttons side by side).
-    const button = (name: 'start' | 'resume' | 'retry' | 'home' | 'mode', on: boolean, str: string, y: number, dx = 0): void => {
+    const button = (name: 'start' | 'resume' | 'retry' | 'home' | 'keep' | 'guide', on: boolean, str: string, y: number, dx = 0): void => {
       const tw = v.label(`btn-${name}-text`, on ? str : '', cx + dx, y + 6, '#ffd98a', 'center');
       const w = tw + 16;
       const x = cx + dx - Math.ceil(w / 2);
@@ -1223,17 +1479,47 @@ export class Game {
     };
     const panel = this.settingsOpen && this.mode !== 'paused';
     const title = this.mode === 'title' && !panel;
-    heading('title-logo', title, 'NEON RIVER', at(0.27) - 8, '#8ff8ff');
-    text('title-sub', title, 'A NIGHT ON THE WATER', at(0.27) + 13, '#99c8cd');
-    text('title-rule-1', title, 'CATCH 200 LB', at(0.42), '#c5e1e8');
-    text('title-rule-2', title, "DON'T LET 20 LB ESCAPE", at(0.42) + 11, '#c5e1e8');
-    text('title-rule-3', title, this.gameMode.rule, at(0.42) + 22, '#c5e1e8');
-    button('start', title, 'TAP TO FISH', at(0.58));
-    // The mode button cycles through the ways to play.
-    // Stacked buttons are a full 44 px touch target apart, however small the texel.
+    heading('title-logo', title, 'NEON RIVER', at(0.12) - 8, '#8ff8ff');
+    text('title-sub', title, 'A NIGHT ON THE WATER', at(0.12) + 13, '#99c8cd');
+    text('title-rule-1', title, 'CATCH 200 LB', at(0.24), '#c5e1e8');
+    // Stacked controls are a full 44 px touch target apart, however small the texel.
     const stack = Math.max(30, Math.ceil(46 / this.texelCss()));
-    button('mode', title, `MODE: ${this.gameMode.name.toUpperCase()}`, at(0.58) + stack);
-    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + stack + 30, '#99c8cd');
+    // The mode picker: one card per way to play, with its one-line description and best result.
+    const cardW = Math.min(204, targetW - 8);
+    const cardH = stack - 3;
+    const cardX = cx - Math.floor(cardW / 2);
+    const cardY = at(0.24) + 15;
+    MODES.forEach((m, i) => {
+      const y = cardY + i * stack;
+      const chosen = m === this.gameMode;
+      const locked = this.locked(m);
+      const record = modeRecord(this.records, m.id);
+      const best = locked ? 'LOCKED' : record.bestTime !== null ? `BEST ${formatTime(record.bestTime)}` : '';
+      const blurb = locked ? (m.lockedBlurb ?? '') : m.blurb;
+      v.panel(`mode-${m.id}-edge`, cardX - 1, y - 1, cardW + 2, cardH + 2, title ? (chosen ? '#ffd98a' : '#243e48') : null, 12);
+      v.panel(`mode-${m.id}-body`, cardX, y, cardW, cardH, title ? (chosen ? '#12303d' : '#06121c') : null, 13);
+      const textY = y + Math.floor((cardH - 19) / 2);
+      v.label(
+        `mode-${m.id}-name`,
+        title ? m.name.toUpperCase() : '',
+        cardX + 5,
+        textY,
+        locked ? '#5f696b' : chosen ? '#ffd98a' : '#c5e1e8',
+      );
+      v.label(`mode-${m.id}-best`, title ? best : '', cardX + cardW - 5, textY, locked ? '#5f696b' : '#8ff8ff', 'right');
+      v.label(`mode-${m.id}-blurb`, title ? blurb : '', cardX + 5, textY + 11, locked ? '#5f696b' : '#99c8cd');
+      this.overlay.place(`mode-${m.id}`, title ? { x: cardX - 1, y: y - 1, w: cardW + 2, h: cardH + 2 } : null);
+      if (title)
+        this.overlay.setModeCard(
+          m.id,
+          `${m.name} mode. ${blurb.toLowerCase()}.${record.bestTime !== null ? ` Best time ${formatTime(record.bestTime)}.` : ''}`,
+          chosen,
+        );
+    });
+    const startY = cardY + MODES.length * stack + 2;
+    button('start', title, 'TAP TO FISH', startY, -45);
+    button('guide', title, 'FIELD GUIDE', startY, 45);
+    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', startY + 30, '#99c8cd');
 
     // Pause and settings are the same panel; on the title the gear opens it without a run.
     const paused = this.mode === 'paused';
@@ -1243,7 +1529,7 @@ export class Game {
     const size = Math.max(13, Math.ceil(44 / t));
     // Heading and close button stay put; the settings list scrolls in the window below them.
     const headY = Math.max(at(0.06), safe.top + size + 6);
-    heading('paused-title', mix, paused ? 'PAUSED' : 'SOUND', headY, '#8ff8ff');
+    heading('paused-title', mix, paused ? 'PAUSED' : 'SETTINGS', headY, '#8ff8ff');
     // Paused: RESUME and HOME side by side. Elsewhere the panel only needs CLOSE.
     button('resume', mix, paused ? 'RESUME' : 'CLOSE', headY + 21, paused ? -30 : 0);
     if (mix) {
@@ -1275,25 +1561,32 @@ export class Game {
     heading('over-title', over, won ? 'A FULL NET' : 'THE NIGHT ENDS', at(0.22) - 8, won ? '#ffd98a' : '#8ff8ff');
     const cause = won ? 'THE RIVER PROVIDES' : this.lossCause === 'eel' ? 'AN EEL RUINED THE CATCH' : 'TOO MANY FISH SLIPPED AWAY';
     text('over-cause', over, cause, at(0.22) + 14, '#c5e1e8');
-    const seconds = Math.round(s.time);
     const accuracy = Math.round((s.catches / Math.max(1, s.catches + s.misses)) * 100);
     const rating = accuracy >= 95 ? 'MASTER' : accuracy >= 85 ? 'EXPERT' : accuracy >= 70 ? 'SKILLED' : 'NOVICE';
+    const record = modeRecord(this.records, this.gameMode.id);
     const lines = won
       ? [
-          `TIME ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`,
+          `TIME ${formatTime(s.time)}`,
           `ACCURACY ${accuracy}%`,
           `BEST STREAK ${s.bestStreak}`,
           `RATING - ${rating}`,
-          ...(this.gameMode.unlocks ? ['HARD RIVER UNLOCKED'] : [`${this.gameMode.name.toUpperCase()} MODE`]),
+          record.bestTime !== null
+            ? `BEST ${formatTime(record.bestTime)} - WINS ${record.wins}`
+            : `${this.gameMode.name.toUpperCase()} MODE`,
+          ...(this.justUnlocked ? ['STORM NIGHT UNLOCKED'] : []),
         ]
       : [`${s.caught} LB CAUGHT - ${s.escaped} LB ESCAPED`, `BEST STREAK ${s.bestStreak}`];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const line = lines[i];
-      text(`over-line-${i}`, over && line !== undefined, line ?? '', at(0.22) + 30 + i * 11, i === 3 || i === 4 ? '#ffd98a' : '#99c8cd');
+      text(`over-line-${i}`, over && line !== undefined, line ?? '', at(0.22) + 30 + i * 11, i >= 3 ? '#ffd98a' : '#99c8cd');
     }
-    button('retry', over, 'FISH AGAIN', at(0.22) + 36 + lines.length * 11);
+    // A Zen win can simply carry on: KEEP FISHING comes first, then the usual two.
+    const keep = over && won && !this.gameMode.losable;
+    const buttonsY = at(0.22) + 36 + lines.length * 11;
+    button('keep', keep, 'KEEP FISHING', buttonsY);
+    button('retry', over, 'FISH AGAIN', buttonsY + (keep ? stack : 0));
     // HOME goes back to the title screen: beside RESUME when paused, under FISH AGAIN on the results.
-    button('home', paused || over, 'HOME', paused ? headY + 21 : at(0.22) + 36 + stack + lines.length * 11, paused ? 32 : 0);
+    button('home', paused || over, 'HOME', paused ? headY + 21 : buttonsY + stack * (keep ? 2 : 1), paused ? 32 : 0);
 
     // Settings (gear) and mute stay in the top-left corner, inside the safe area, on every screen:
     // title, play, pause, the win and the results. Each is drawn at least 44 CSS px square, so art,
@@ -1344,7 +1637,7 @@ export class Game {
     const stageIds = STAGES.map((p) => p.id);
     const settle = (seconds: number, opts: { startStage?: number; idle?: boolean } = {}): void => {
       this.frozen = false;
-      this.startRun(opts.startStage ?? 0);
+      this.startRun(opts.startStage ?? 0, true);
       this.autoplay = !opts.idle;
       const warm = 1.5;
       for (let t = 0; t < seconds - warm && this.sim.state.status === 'playing'; t += STEP) {
@@ -1367,10 +1660,23 @@ export class Game {
       setState: async (name: string) => {
         await this.ready;
         const phase = /^phase[:.](.+)$/.exec(name);
-        if (name === 'title') {
+        this.gallery?.close();
+        if (name === 'title' || name === 'mode-picker') {
           this.frozen = false;
           this.settingsOpen = false;
           this.setMode('title');
+        } else if (name === 'gallery') {
+          this.frozen = false;
+          this.settingsOpen = false;
+          this.setMode('title');
+          await this.openGallery();
+          if (!this.gallery) throw new Error('gallery not reached');
+        } else if (name === 'visuals') {
+          this.frozen = false;
+          this.setMode('title');
+          this.settingsOpen = true;
+          this.panel.setAdvanced(false);
+          this.panel.setVisualsOpen(true);
         } else if (name === 'active-play') settle(9);
         else if (phase && stageIds.includes(phase[1] ?? '')) settle(5, { startStage: stageIds.indexOf(phase[1] ?? '') });
         else if (name === 'speed-up' || name === 'rest') {
@@ -1437,7 +1743,7 @@ export class Game {
         } else if (name === 'loss-escaped') {
           // A net that keeps clear of everything, so the night ends on the escape budget.
           this.frozen = false;
-          this.startRun();
+          this.startRun(0, true);
           while (this.sim.state.status === 'playing') {
             const arriving = this.sim.state.fish.filter((f) => f.status === 'swimming' && f.progress > 0.6).map((f) => f.lane);
             const spots = [0, 0.2, 0.4, 0.6, 0.8, 1];
@@ -1472,10 +1778,15 @@ export class Game {
       soloAudio: (name: string | null) => this.audio.setSolo(name),
       setGameMode: (id: string) => {
         this.frozen = false;
-        this.startRun();
+        this.startRun(0, true);
         this.setMode('title');
+        // Tests reach a locked mode without earning it; the unlock is not saved.
+        if (this.locked(modeById(id))) this.hookUnlock = true;
         this.setGameMode(id);
       },
+      openAdvancedVisuals: (open: boolean) => this.panel.setVisualsOpen(open),
+      setVisuals: (patch: Partial<VisualSettings>) => this.visuals.update(patch),
+      gallery: () => this.gallery,
       setWeight: (pounds: number) => {
         this.sim.state.caught = pounds;
         this.basketWeight = pounds;
@@ -1496,6 +1807,10 @@ export class Game {
       elapsed: s.time,
       mode: this.mode,
       gameMode: this.gameMode.id,
+      hardUnlocked: this.records.hardUnlocked,
+      endless: s.endless,
+      gallery: this.gallery !== null,
+      visuals: { ...this.visuals.settings },
       phase: s.stage.id,
       stage: s.stageIndex,
       settings: this.mode === 'paused' || this.settingsOpen,

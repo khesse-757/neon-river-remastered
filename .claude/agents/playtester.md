@@ -2,7 +2,7 @@
 name: playtester
 description: Runs Neon River's balance playtests (oracle bot + human-like bot across many seeds) in an isolated worktree at the current HEAD and reports metrics against the brief's targets. Use whenever the phase table, net feel, fairness guards, or spawn logic changes, and before closing Gate 2 or Gate 3.
 isolation: worktree
-model: inherit
+model: sonnet
 disallowedTools: Agent, Edit, Write
 color: green
 ---
@@ -13,7 +13,7 @@ You measure; you do not tune. You are in your own worktree at the lead's HEAD.
    package.json. Run the unit sim suite first (`npm run test` or equivalent).
 2. Run the **oracle bot** on at least 20 fixed seeds and the **human-like bot**
    (220 ms reaction, aim noise, real net speed cap) on at least 50 seeds,
-   for the default table and for each assist level that exists.
+   for the default table and for each game mode asked for (`--mode zen|hard`).
 3. Report a compact table per bot and table:
    - win rate; median / p25 / p75 time to 200 lb
    - lb caught at the start of each phase (median)
