@@ -40,7 +40,8 @@ speed, and eels create risk; each catch adds weight and builds a streak; each
 miss spends the 20-lb budget; an eel ends the night. Restart is one tap.
 
 - Every 1–3 s: pick the next fish in the chain, slide, scoop.
-- Every 10–20 s: a new phase with a new pattern, announced and breathed into.
+- Every ~30 s: a speed-up, announced without a pause (stinger, sign, current
+  streaks, neon surge); the last stage swaps banks.
 - Across ~2:15: the night changes (rain, storm, moonrise) as the run
   escalates; the basket and HUD both show progress toward 200.
 - A better player: reads the chain early, lets low-value fish go during
@@ -75,51 +76,60 @@ Read `ORIGINAL_FISHING_DESIGN.md` first. Implement:
   bend; eels announce ~0.6 s early with a crackle sound and a blue under-glow
   at the emitter.
 
-### 3.3 Pace — "One Night on the River"
+### 3.3 Pace — "One Night on the River": four stages, three speed-ups
 
-The run starts lively and keeps getting faster and harder the whole way. Two
-layers set the pace (all numbers live in `src/sim/config.ts`; tune with the
-playtester and the dev `?tune` panel, and record changes):
+A fun side-to-side dance, like the original: one emitter sweeps the river and
+lays down a chain of fish that the net follows. Spawning never pauses. All
+numbers live in `src/sim/config.ts`; tune with the playtester and the dev
+`?tune` panel, and record changes in `artifacts/game-progress.md`.
 
-**Continuous ramp.** Progress 0→1 on whichever is further along: elapsed time
-over 135 s, or weight caught over 200 lb.
+**Stage 1, Still Water.** The emitter sweeps bank to bank as a smooth sine
+(eased, no jitter, no reversals), so a steady chain of mostly 1-lb fish draws
+a flowing S-curve. Koi ~8%. Eels rare (~5%) and at least five fish apart.
 
-| | Start | End |
-| --- | --- | --- |
-| Fish travel time (far bend → net) | 3.0 s | 1.9 s |
-| Spawn period | 0.62 s | 0.42 s |
-| Emitter sweep | 0.8 widths/s | 3.0 widths/s |
+**Speed-ups 1, 2, 3.** The game speeds up three distinct times, at 40 / 90 /
+140 lb caught, or at 0:35 / 1:05 / 1:35 if the player is behind. Each one
+raises fish speed by 12% (the whole river's current picks up, so the chain
+keeps its spacing), shortens the spawn period, speeds the sweep, and adds
+randomness: swings that stop short and sudden mid-river reversals. Each is
+announced by a short stinger, the stage's sign, streaks of current down the
+river and a surge of neon. **Spawning never pauses for an announcement.**
 
-**Phases** shape the pattern on top of the ramp with multipliers and the
-eel/koi mix. One emitter for now; the second emitter for Braided Stream is Gate 2.
+**Stage 4, Bank to Bank** (after speed-up 3, until 200 lb). Fish and eels
+swap sides: a burst of 2–4 pinned at one bank, then immediately the other
+bank, mixed with fast zigzags and eels dropped into the chain.
 
-| # | Name (banner) | Length | Sweep × | Period × | Eel | Koi | Pattern |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Still Water | 11 s | 0.8 | 1 | 22% | 3% | trace the chain; first eels |
-| 2 | First Spark | 12 s | 1 | 1 | 34% | 4% | eels in the chain |
-| 3 | Lantern Koi | 10 s | 1.6 | 1.25 | 28% | 14% | zigzag; choose the koi |
-| 4 | Twin Banks | 9 s | pinned, alternating every 3 s | 1.2 | 24% | 8% | long traversals |
-| 5 | Rising Tide | 14 s | 1 | 0.92 | 36% | 4% | density |
-| 6 | Neon Rapids | 14 s | 1.4 | 1 | 38% | 4% | dense zigzag |
-| 7 | Eel Storm | 10 s | 1 | 0.9 | 66% | 10% | thread through eels |
-| 8 | Braided Stream | 12 s | 1.3, quick reversals | 0.93 | 50% | 5% | weave |
-| 9 | Moonrise | 16 s | 1 | 0.93 | 52% | 6% | everything |
+| # | Stage (sign) | Fish speed | Spawn period | Bank-to-bank sweep | Swing length | Reversals | Eel roll / spacing | Koi |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Still Water | ×1 (3.0 s far bend → net) | 0.90 s | 4.0 s | always full | none | 6.7% / 5 fish (≈5% of spawns) | 8% |
+| 2 | Quickening | ×1.12 | 0.74 s | 3.0 s | 55–100% | 0.12 /s | 22% / 2 fish (≈15%) | 8% |
+| 3 | Neon Rapids | ×1.25 | 0.62 s | 1.8 s | 40–100% | 0.30 /s | 40% / 1 fish (≈28%) | 8% |
+| 4 | Bank to Bank | ×1.40 | 0.50 s | 1.15 s | 40–100%, bursts after 65% of swings | 0.40 /s | 50% / none (≈46%) | 7% |
 
-After Moonrise the script loops phases 6–9 until the run ends.
-
-- **No calm opener:** a run starts with fish already in the river; the first one
-  reaches the net at about 1.7 s.
-- **Rests are 0.75 s**; the phase banner shows for 1.6 s and spawning resumes under it.
-- **Pace targets for a solid player:** ~50 lb by 0:40, ~100 lb by 1:15, 200 lb by ~2:15.
-- **Why the eel share is high and the period stops at 0.42 s:** only 20 lb may
-  escape, so the weight spawned by any moment is, within 20 lb, the weight a
-  winner has caught by then. The pace targets therefore fix the spawned weight
-  at about 1.4–2 lb/s. Extra liveliness has to come from speed, sweep and eels
-  (which weigh nothing), not from more catchable fish. A period of 0.28 s with
-  this eel share would spawn roughly twice the target weight.
-- **Fairness:** a non-eel may jump at most 40% of what the capped net can cover
-  in one spawn period; eels and fish arriving within 0.35 s are at least 0.4
-  widths apart; eel hitbox radius 0.032 widths.
+- **No down time:** no rests and no separate phases; a spawn is never skipped,
+  so the longest gap without a spawn is the stage's own period; a fish is
+  always in the half of the river nearest the net. A night starts with the
+  river already running: the first fish reaches the net at about 1.5 s.
+- **Smoothness:** a fish never changes lane after it spawns; every fish
+  spawns exactly on the emitter (no fairness relocation); the swim animation
+  keeps the head on its lane (the tail works, the body does not wander); the
+  chain reads as a curve. The only jump is Bank to Bank's swap, which is the
+  pattern.
+- **Pace targets for a solid player:** speed-ups near 0:30 / 1:00 / 1:30 and
+  200 lb in about 2:00–2:30.
+- **Why the spawn period is not 0.5 s from the start:** only 20 lb may escape,
+  so the weight spawned by any moment is, within 20 lb, the weight a winner has
+  caught by then. A 2:00–2:30 win fixes the supply at about 1.5 lb/s. Still
+  Water's mix (8% koi, 5% eels) is worth 1.27 lb per spawn, so its period has
+  to be near 0.9 s; at 0.5 s the first speed-up would come at 0:18 and the win
+  at about 1:20. Later stages get denser because more of their spawns are
+  eels, which weigh nothing. Bank to Bank reaches 0.5 s.
+- **Fairness:** every eel is warned 0.6 s before it appears, and the warning
+  is called off if the eel will not come; while sweeping, a non-eel is never
+  further from the last one than half of what the capped net can cover in the
+  time between them; eels and fish arriving within 0.35 s are at least 0.4
+  widths apart; eel hitbox radius 0.032 widths; the oracle bot wins every seed
+  without touching an eel (§9).
 - **Assist ("the river calms")** and **Endless "Hard River"** are unchanged in
   intent and are Gate 2.
 
@@ -140,10 +150,14 @@ After Moonrise the script loops phases 6–9 until the run ends.
 - Circle test in water-plane space: `dist < netRadius + fishRadius`. Fish
   hitbox slightly generous, eel hitbox slightly forgiving (≈85% of visual).
 - Scoop: fish slows, snaps toward net lane, shrinks into the net; splash, ripple
-  ring, weight pop (+1 / +5) that flies to the HUD.
-- **Streak:** consecutive catches climb a pentatonic scale (Japanese *in* or
-  *hirajōshi*) on a plucked-string voice; a koi plays a chord; a miss plays a
-  low muted note. The music *is* the feedback.
+  ring, and a small weight pop (+1 / +5) that rises and fades at the catch
+  point while the score tablet pulses where it sits. Nothing flies across the
+  screen.
+- **Catch sound:** a clean splash and a soft, short chime on the tonic or the
+  fifth, which cannot clash with the music bed. **Fish Notes** (off by
+  default, a setting): consecutive catches play the leitmotif's catch melody
+  in D *hirajōshi* on the chosen instrument; a koi plays a chord; a miss
+  answers with a low phrase. Nothing sounds when a fish spawns or passes.
 - **Near-miss eel:** sparks + crackle when an eel passes within a small margin.
 - **Eel catch:** hit-stop (~120 ms), the river goes dark, neon city flickers
   out, the eel's lightning arcs up the pole, fisherman jolts, screen to results.
@@ -230,8 +244,8 @@ light and sound — never color alone.
   Fully unit-tested with Vitest across many seeds.
 - Rendering, input, UI, audio subscribe to sim events.
 - Scaffold's `__THREE_GAME_TEST_HOOKS__` with real states: `title`,
-  `active-play`, `phase:<name>` for each phase, `rest`, `win`, `loss-eel`,
-  `loss-escaped`, `pause`, `settings`.
+  `active-play`, `phase:<id>` for each stage, `speed-up` (`rest` is kept as
+  an alias), `win`, `loss-eel`, `loss-escaped`, `pause`, `settings`.
 - Keep v1 quality tooling: ESLint, Prettier, Husky pre-commit, GitHub Actions
   CI (lint, typecheck, unit tests, build) and Pages deploy.
 - Budgets (v2): 60 fps on a mid-range phone; ≤ 100 draw calls mobile / 200
@@ -252,9 +266,13 @@ code is in scope.
 - **Oracle bot:** a planner with perfect information but the real net speed cap
   must reach 200 lb with zero eels on every test seed (proves winnability).
 - **Human-like bot:** reaction delay 220 ms, aim noise, same speed cap; report
-  median time to 200, win rate, phase of first loss, and the pace curve (lb vs
-  time). Targets: win rate 35–60%; ~50 lb by 0:40, ~100 lb by 1:15, 200 lb by
-  ~2:15; first fish at the net within ~2 s.
+  median time to 200, win rate, stage of first loss, and the pace curve (lb vs
+  time) with the three speed-ups marked. Targets: win rate 35–60%; speed-ups
+  near 0:30 / 1:00 / 1:30; 200 lb in 2:00–2:30; first fish at the net within
+  ~2 s.
+- **Audio by measurement:** Playwright clicks every `?audition` button and
+  triggers the in-game start sting, catch, eel shock and win fanfare; an
+  AnalyserNode on the final output must report non-silent RMS for each.
 - Playwright smoke + visual captures for all hook states on desktop (1440×900)
   and mobile (390×844), the canvas inspector manifest, renderer diagnostics.
 - Real-input checks: mouse, keyboard, touch drag (emulated), gamepad (if

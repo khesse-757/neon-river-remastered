@@ -1,4 +1,4 @@
-import { AudioBus, CHANNEL_LABELS, CHANNELS } from '../audio/AudioBus';
+import { AudioBus } from '../audio/AudioBus';
 import { Loop } from '../core/Loop';
 import { RIVER } from '../data/river';
 import { Input } from '../input/Input';
@@ -9,12 +9,13 @@ import { PIXEL_FONT, TITLE_FONT } from '../render/PixelText';
 import { SceneRenderer, type ActorResolution, type FrameView, type WaterLight } from '../render/SceneRenderer';
 import { oracleIntent } from '../sim/bots/oracle';
 import { trackerIntent } from '../sim/bots/tracker';
-import { DEFAULT_CONFIG, PHASES, type FishKind, type SimConfig } from '../sim/config';
+import { DEFAULT_CONFIG, STAGES, type FishKind, type SimConfig } from '../sim/config';
 import type { NetIntent } from '../sim/net';
 import { River, type RiverData } from '../sim/river';
 import { createRng, type Rng } from '../sim/rng';
 import { Sim, type Fish, type LossCause, type SimEvent } from '../sim/sim';
 import { Overlay } from '../ui/Overlay';
+import { PANEL_WIDTH, SettingsPanel } from '../ui/SettingsPanel';
 
 export type Mode = 'loading' | 'title' | 'playing' | 'paused' | 'over';
 
@@ -38,6 +39,10 @@ const SCOOP_TIME = 0.34;
 /** Progress at which the emitter's lane is shown: the first place the river is wide enough to read it. */
 const EMITTER_READ = 0.24;
 const TOSS_TIME = 0.5;
+/** A weight pop rises and fades where the fish was caught. */
+const POP_SECONDS = 0.75;
+/** How long a speed-up's surge (current streaks, neon) lasts. */
+const SURGE_SECONDS = 1.6;
 
 const C = {
   eel: color('#39e6ee'),
@@ -138,6 +143,13 @@ export class Game {
   private reduceFlashing = false;
   private banner = 0;
   private bannerText = '';
+  /** Seconds left of a speed-up's surge. */
+  private surge = 0;
+  private streakTimer = 0;
+  /** Seconds left of the score tablet's pulse after a catch. */
+  private hudPulse = 0;
+  private audioPeak = 0;
+  private readonly panel: SettingsPanel;
   private telegraph: { lane: number; age: number } | null = null;
   private fireflyTimer = 0;
   private readonly wake = new Map<number, number>();
@@ -158,27 +170,18 @@ export class Game {
     this.reduceFlashing = this.reducedMotion;
     this.overlay = new Overlay({
       start: () => this.confirm(),
-      resume: () => (this.mode === 'title' ? this.toggleSettings() : this.togglePause()),
+      resume: () => this.closePanel(),
       retry: () => this.confirm(),
       settings: () => this.toggleSettings(),
       mute: () => {
         void this.audio.unlock();
         this.audio.setMuted(!this.audio.isMuted);
         this.overlay.setMuted(this.audio.isMuted);
-      },
-      volume: (key, value) => {
-        void this.audio.unlock();
-        this.audio.setVolume(key, value);
-        this.audio.preview(key);
-      },
-      toggle: (key, on) => {
-        void this.audio.unlock();
-        this.audio.setEnabled(key, on);
-        if (on) this.audio.preview(key);
+        this.audio.uiTick();
       },
     });
     this.overlay.setMuted(this.audio.isMuted);
-    for (const key of CHANNELS) this.overlay.setChannel(key, this.audio.getVolume(key), this.audio.isEnabled(key));
+    this.panel = new SettingsPanel(this.audio);
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config });
     this.installTestHooks();
     this.ready = this.load(grid[0], grid[1]);
@@ -214,10 +217,24 @@ export class Game {
     else if (this.mode === 'paused') this.setMode('playing');
   }
 
-  /** The gear: pause-and-settings during play, a settings panel over the title. */
+  /**
+   * The gear, always on screen: pause-and-settings during play; a settings panel over the title,
+   * the win sequence and the results.
+   */
   toggleSettings(): void {
-    if (this.mode === 'title') this.settingsOpen = !this.settingsOpen;
-    else this.togglePause();
+    if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
+    else if (this.mode === 'paused') this.setMode('playing');
+    else if (this.mode !== 'loading') this.settingsOpen = !this.settingsOpen;
+  }
+
+  /** The panel's RESUME / CLOSE button. */
+  private closePanel(): void {
+    if (this.mode === 'paused') this.setMode('playing');
+    else this.settingsOpen = false;
+  }
+
+  private buzz(pattern: number | number[]): void {
+    if (navigator.vibrate && this.audio.settings.haptics && !this.reducedMotion) navigator.vibrate(pattern);
   }
 
   /** Space pauses and resumes during play and never does anything else there. */
@@ -262,8 +279,9 @@ export class Game {
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.mode === 'playing' && this.win === 0) this.setMode('paused');
-      // A hidden tab is silent in every mode; a paused game keeps its beds so the mix can be set by ear.
-      this.audio.setPaused(document.hidden);
+      // A hidden tab goes quiet (unless that setting is off); a paused game keeps its beds so the
+      // mix can be set by ear.
+      this.audio.setHidden(document.hidden);
     });
     window.addEventListener('blur', () => {
       if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
@@ -297,23 +315,27 @@ export class Game {
     else if (this.mode === 'title' || this.mode === 'over') {
       this.settingsOpen = false;
       this.startRun();
-      // The leitmotif, stated once, as the night begins: wait for the sampled voice and the music
-      // so the first thing the player hears is the real instrument, in time.
+      // The leitmotif, stated once, as the night begins. The samples were preloaded with the page;
+      // on a very slow first load the sting waits for the real voice, and is dropped rather than
+      // played late or on a stand-in.
       const run = this.runCount;
-      void this.audio.ready().then(() => {
-        // Not if the night already ended while the samples were loading.
-        if (this.runCount === run && this.mode === 'playing' && this.sim.state.status === 'playing') this.audio.startSting();
+      void this.audio.ready(8000).then(() => {
+        const live = this.runCount === run && this.mode === 'playing' && this.sim.state.status === 'playing';
+        const voiced = this.audio.settings.instrument !== 'koto' || this.audio.hasSample('koto');
+        if (live && voiced && this.sim.state.time < 4) this.audio.startSting();
       });
     } else if (this.mode === 'paused') this.setMode('playing');
   }
 
-  private startRun(startPhase = 0): void {
+  private startRun(startStage = 0): void {
     // Wall-clock time only picks the seed; the run itself stays deterministic for that seed.
     if (!this.seedPinned) this.seed = (Date.now() + this.runCount * 7919) >>> 0;
     this.runCount += 1;
-    this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startPhase });
-    // Starting mid-script (test hooks): put the clock, and so the ramp, where that phase would begin.
-    this.sim.state.time = this.config.phases.slice(0, startPhase).reduce((t, p) => t + p.length + this.config.restSeconds, 0);
+    this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startStage });
+    this.banner = 0;
+    this.surge = 0;
+    this.hudPulse = 0;
+    this.audio.cancelWarning();
     this.fx = createRng(this.seed ^ 0x9e3779b9);
     this.accumulator = 0;
     this.hitstop = 0;
@@ -405,24 +427,25 @@ export class Game {
   private onEvent(event: SimEvent): void {
     const { particles, ripples } = this.view;
     switch (event.type) {
-      case 'restStart':
-        this.bannerText = event.next.name.toUpperCase();
+      case 'stage':
+        // The sign names the stage; the fish keep coming under it.
+        this.bannerText = event.stage.name.toUpperCase();
         this.banner = this.config.bannerSeconds;
-        this.audio.phaseSting();
-        break;
-      case 'phaseStart':
-        // The opening phase has no rest before it, so its banner starts here.
-        if (this.banner <= 0 && this.sim.state.time < 0.5) {
-          this.bannerText = event.phase.name.toUpperCase();
-          this.banner = this.config.bannerSeconds;
+        if (event.index > 0) {
+          // A speed-up: stinger, current streaks down the river and a surge of neon.
+          this.surge = SURGE_SECONDS;
+          this.audio.speedUpSting(event.index);
+          this.buzz(14);
         }
         break;
       case 'telegraph':
         this.telegraph = { lane: event.lane, age: 0 };
-        this.audio.crackle(0.5, 0.22);
+        this.audio.warn();
         break;
-      case 'spawn':
-        this.audio.spawn();
+      case 'telegraphCancel':
+        // The eel is not coming after all: the glow and the crackle let go.
+        this.telegraph = null;
+        this.audio.cancelWarning();
         break;
       case 'catch': {
         const p = this.fishPoint(event.fish);
@@ -448,7 +471,8 @@ export class Game {
           });
         }
         this.pops.push({ text: `+${event.weight}`, age: 0, fromX: p.x, fromY: p.y - 8, color: koi ? '#ffcc66' : '#c7e1e8' });
-        if (navigator.vibrate && !this.reducedMotion) navigator.vibrate(koi ? 18 : 8);
+        this.hudPulse = 0.22;
+        this.buzz(koi ? 18 : 8);
         break;
       }
       case 'miss': {
@@ -470,7 +494,7 @@ export class Game {
       }
       case 'eelNear': {
         const p = this.fishPoint(event.fish);
-        this.audio.crackle(0.25, 0.3);
+        this.audio.crackle(0.25, 0.18);
         this.sparks(p.x, p.y, 10);
         break;
       }
@@ -486,7 +510,7 @@ export class Game {
           const f = i / 16;
           this.sparks(net.x + (grip.x - net.x) * f, net.y + (grip.y - net.y) * f, 2, 0.5);
         }
-        if (navigator.vibrate && !this.reducedMotion) navigator.vibrate([40, 30, 80]);
+        this.buzz([40, 30, 80]);
         break;
       }
       case 'lose':
@@ -535,7 +559,37 @@ export class Game {
       if (this.telegraph.age > this.config.telegraphLead + 0.15) this.telegraph = null;
     }
     for (const pop of this.pops) pop.age += dt;
-    while (this.pops[0] && this.pops[0].age > 0.7) this.pops.shift();
+    while (this.pops[0] && this.pops[0].age > POP_SECONDS) this.pops.shift();
+    this.hudPulse = Math.max(0, this.hudPulse - dt);
+
+    // The current: streaks of light run down the river, a rush of them at each speed-up and a
+    // few more with every stage, so the water itself looks faster.
+    this.surge = Math.max(0, this.surge - dt);
+    const rush = this.surge / SURGE_SECONDS;
+    const streaks = this.mode === 'playing' && this.win === 0 ? state.stageIndex * 5 + 60 * rush * rush : 0;
+    const railSize = this.river.screenAt(1, 0.5).scale;
+    this.streakTimer += dt * streaks;
+    while (this.streakTimer >= 1) {
+      this.streakTimer -= 1;
+      const s = 0.12 + this.fx.next() * 0.8;
+      const lane = 0.04 + this.fx.next() * 0.92;
+      const a = this.gridPoint(s, lane);
+      const b = this.gridPoint(Math.min(this.river.maxS, s + 0.03), lane);
+      const pull = (rush > 0 ? 20 : 14) * (0.8 + state.stageIndex * 0.15);
+      // Three dots in a line read as one streak.
+      const rel = a.scale / railSize;
+      for (let k = 0; k < 5; k++)
+        particles.emit({
+          x: a.x - (b.x - a.x) * k * 0.5,
+          y: a.y - (b.y - a.y) * k * 0.5,
+          vx: (b.x - a.x) * pull,
+          vy: (b.y - a.y) * pull,
+          life: 0.5 - k * 0.05,
+          color: k === 0 ? C.white : C.shimmer,
+          size: 1.5 + rel * 2 - k * 0.2,
+          glow: this.reduceFlashing ? 0.9 : 1.7 - k * 0.2,
+        });
+    }
 
     // Scoop: the hoop lifts and tips, the cloth swells, then both settle.
     if (this.scoop > 0) {
@@ -974,8 +1028,8 @@ export class Game {
           ? 0
           : cheer
             ? Math.floor(this.time * 2.67) % 2 === 0
-              ? 1
-              : -1
+              ? 2
+              : -2
             : state.net.lane < 0.33
               ? -1
               : state.net.lane > 0.72
@@ -984,7 +1038,11 @@ export class Game {
       jolt: shock > 0 && shock < (this.reduceFlashing ? 0.12 : 0.5) ? (Math.floor(shock * 30) % 2 === 0 ? 1 : -1) : 0,
       darken: Math.max(darken, dim),
       // The city surges on a win.
-      neon: this.win > 0 ? 1 + 0.55 * THREE.MathUtils.smoothstep(this.win, 1, 2.2) * (0.85 + 0.15 * Math.sin(this.time * 6)) : neonOut,
+      neon:
+        this.win > 0
+          ? 1 + 0.55 * THREE.MathUtils.smoothstep(this.win, 1, 2.2) * (0.85 + 0.15 * Math.sin(this.time * 6))
+          : // The city surges with each speed-up.
+            neonOut * (1 + (this.reduceFlashing ? 0.2 : 0.6) * (this.surge / SURGE_SECONDS) ** 2),
       flash,
       glitch: shock > 0 && shock < 0.06 && !this.reducedMotion ? 0.004 : 0,
       // A swell of gold as the celebration starts, settling to a faint warmth.
@@ -994,6 +1052,8 @@ export class Game {
             THREE.MathUtils.smoothstep(this.win, 0.5, 0.8)
           : 0,
       drift: this.reducedMotion ? 0 : (netLane - 0.5) * 3 + Math.sin(this.time * 0.13) * 1.2,
+      // He jumps on the fanfare's beat.
+      hop: cheer && Math.floor(this.time * 5.33) % 2 === 0 ? 3 : 0,
     };
   }
 
@@ -1016,18 +1076,26 @@ export class Game {
     // Without a gutter the tablet sits top-left under the pause button, over trees and sky: the
     // cobbles belong to the basket and the fisherman.
     const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : safe.top + controlSize + 8;
-    v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
+    // The tablet pulses where it sits when a catch lands: a bright rim and a lit number.
+    const pulse = show && this.hudPulse > 0 && this.mode === 'playing';
+    v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? (pulse ? '#ffd98a' : '#030911') : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
-    v.panel('hud-lip', x, y, w, 1, show ? '#5f696c' : null);
+    v.panel('hud-lip', x, y, w, 1, show ? (pulse ? '#c5e1e8' : '#5f696c') : null);
     v.label('hud-caught-label', show ? 'CAUGHT' : '', x + 5, y + 3, '#a1987a');
-    v.label('hud-caught', show ? `${s.caught}/${this.config.winWeight}` : '', x + 5, y + 12, '#9ccbcf');
+    v.label(
+      'hud-caught',
+      show ? `${s.caught}/${this.config.winWeight}` : '',
+      x + 5,
+      y + 12 - (pulse ? 1 : 0),
+      pulse ? '#ffffff' : '#9ccbcf',
+    );
     v.label('hud-escaped-label', show ? 'ESCAPED' : '', x + 53, y + 3, '#a1987a');
     const danger = s.escaped >= this.config.maxEscaped - 6;
     v.label('hud-escaped', show ? `${s.escaped}/${this.config.maxEscaped}` : '', x + 53, y + 12, danger ? '#ff9933' : '#9ccbcf');
     v.label('hud-streak', show && this.mode !== 'over' && s.streak >= 3 ? `x${s.streak}` : '', x + w + 4, y + 8, '#ffd98a');
 
     // Phase banner: a hanging wooden sign over the sky, clear of the river's path.
-    const banner = this.banner > 0 && (this.mode === 'playing' || this.mode === 'paused');
+    const banner = this.banner > 0 && this.mode === 'playing' && !this.settingsOpen;
     const bw = this.bannerText.length * 6 + 14;
     const bx = Math.floor(originX + gridW / 2 - bw / 2);
     const by = originY + Math.floor(gridH * 0.035);
@@ -1046,13 +1114,21 @@ export class Game {
         v.label(`pop-${i}`, '', 0, 0, '#ffffff');
         continue;
       }
-      // Rise from the net, then fly to the tablet.
-      const t = Math.min(1, pop.age / 0.7);
-      const fly = Math.max(0, (t - 0.35) / 0.65);
-      const px = originX + pop.fromX + (x + 20 - (originX + pop.fromX)) * fly * fly;
-      const py = originY + pop.fromY - 10 * Math.min(1, t / 0.35) + (y + 10 - (originY + pop.fromY - 10)) * fly * fly;
-      v.label(`pop-${i}`, pop.text, px, py, pop.color, 'center');
+      // A small pop that rises a little and fades where the fish was caught.
+      const t = Math.min(1, pop.age / POP_SECONDS);
+      const fade = t > 0.75 ? '#5f696b' : t > 0.5 ? (pop.color === '#ffcc66' ? '#a0773a' : '#7c9aa0') : pop.color;
+      v.label(`pop-${i}`, pop.text, originX + pop.fromX, originY + pop.fromY - Math.round(9 * (1 - (1 - t) ** 2)), fade, 'center');
     }
+
+    // The fisherman calls out as he cheers.
+    const f = v.assets.fishermanRect;
+    const shout = this.win > 0.9 && this.mode === 'playing' && !this.settingsOpen;
+    const sx = originX + f.x + Math.floor(f.width / 2) - 8;
+    const sy = originY + f.y - 15;
+    const sw = v.label('cheer-text', shout ? 'A FULL NET!' : '', sx, sy + 3, '#030911', 'center', false);
+    v.panel('cheer-edge', sx - Math.ceil(sw / 2) - 4, sy - 1, sw + 8, 15, shout ? '#030911' : null, 16);
+    v.panel('cheer-body', sx - Math.ceil(sw / 2) - 3, sy, sw + 6, 13, shout ? '#ffd98a' : null, 17);
+    v.panel('cheer-tail', sx + 2, sy + 13, 3, 3, shout ? '#ffd98a' : null, 17);
   }
 
   /** Title, pause and end screens, drawn on the grid; the DOM only supplies hit areas. */
@@ -1083,7 +1159,7 @@ export class Game {
     const heading = (id: string, on: boolean, str: string, y: number, color: string): void => {
       v.label(id, on ? str : '', cx, y, color, 'center', true, true);
     };
-    const panel = this.settingsOpen && this.mode === 'title';
+    const panel = this.settingsOpen && this.mode !== 'paused';
     const title = this.mode === 'title' && !panel;
     heading('title-logo', title, 'NEON RIVER', at(0.27) - 8, '#8ff8ff');
     text('title-sub', title, 'A NIGHT ON THE WATER', at(0.27) + 13, '#99c8cd');
@@ -1096,35 +1172,38 @@ export class Game {
     // Pause and settings are the same panel; on the title the gear opens it without a run.
     const paused = this.mode === 'paused';
     const mix = paused || panel;
-    heading('paused-title', mix, paused ? 'PAUSED' : 'SOUND', at(0.2) - 8, '#8ff8ff');
-    button('resume', mix, paused ? 'RESUME' : 'CLOSE', at(0.28));
-    // One row per channel: an on/off box and a level slider, drawn here and operated through
-    // transparent form controls laid exactly over them.
-    const rowPitch = Math.max(18, Math.ceil(46 / this.texelCss()));
-    const box = Math.max(9, Math.min(13, Math.ceil(24 / this.texelCss())));
-    CHANNELS.forEach((key, i) => {
-      const y = at(0.28) + 24 + Math.ceil(rowPitch / 2) + 6 + i * rowPitch;
-      const trackW = 60;
-      const x = cx + 14;
-      const value = this.audio.getVolume(key);
-      const on = this.audio.isEnabled(key);
-      const bx = cx - 4;
-      v.panel(`vol-${key}-plate`, cx - 82, y - 3, 164, 13, mix ? '#030911' : null, 11);
-      v.label(`vol-${key}-label`, mix ? CHANNEL_LABELS[key] : '', bx - 6, y, on ? '#c5e1e8' : '#5f696b', 'right');
-      v.panel(`tog-${key}-edge`, bx, y - 1, 9, 9, mix ? '#99c8cd' : null, 12);
-      v.panel(`tog-${key}-fill`, bx + 1, y, 7, 7, mix ? (on ? '#29bcc2' : '#091a27') : null, 13);
-      v.panel(`vol-${key}-track`, x, y + 2, trackW, 3, mix ? '#243e48' : null, 12);
-      v.panel(`vol-${key}-fill`, x, y + 2, Math.round(trackW * value), 3, mix ? (on ? '#29bcc2' : '#414d51') : null, 13);
-      v.panel(`vol-${key}-knob`, x + Math.round((trackW - 4) * value), y - 1, 4, 9, mix ? (on ? '#ffd98a' : '#7c806a') : null, 14);
-      this.overlay.place(
-        `tog-${key}`,
-        mix ? { x: bx - Math.floor((box - 9) / 2), y: y - 1 - Math.floor((box - 9) / 2), w: box, h: box } : null,
-      );
-      this.overlay.place(`vol-${key}`, mix ? { x, y: y - 3, w: trackW, h: 13 } : null);
-    });
+    const safe = this.safeTexels();
+    const t = this.texelCss();
+    const size = Math.max(13, Math.ceil(44 / t));
+    // Heading and close button stay put; the settings list scrolls in the window below them.
+    const headY = Math.max(at(0.06), safe.top + size + 6);
+    heading('paused-title', mix, paused ? 'PAUSED' : 'SOUND', headY, '#8ff8ff');
+    button('resume', mix, paused ? 'RESUME' : 'CLOSE', headY + 21);
+    if (mix) {
+      const listY = headY + 21 + Math.max(24, Math.ceil(46 / t));
+      const listX = cx - PANEL_WIDTH / 2;
+      const sheet = this.panel.show(listX, listY, targetH - safe.bottom - 3 - listY, t);
+      v.sheet('settings-sheet', sheet, listX, listY, this.panel.version, 22);
+    } else {
+      this.panel.hide();
+      v.sheet('settings-sheet', null);
+    }
+    // The test sound's level meter, live.
+    const meter = mix ? this.panel.meterRect() : null;
+    const level = this.audio.level();
+    const lit = meter ? Math.round(meter.w * Math.min(1, Math.max(0, (20 * Math.log10(Math.max(level, 1e-6)) + 54) / 54))) : 0;
+    v.panel(
+      'meter-fill',
+      meter?.x ?? 0,
+      meter?.y ?? 0,
+      lit,
+      meter?.h ?? 0,
+      meter && lit > 0 ? (lit > (meter.w * 5) / 6 ? '#ffd98a' : '#39e6ee') : null,
+      23,
+    );
 
     // End of the night. A win shows the results card.
-    const over = this.mode === 'over';
+    const over = this.mode === 'over' && !panel;
     const won = this.lossCause === null;
     heading('over-title', over, won ? 'A FULL NET' : 'THE NIGHT ENDS', at(0.22) - 8, won ? '#ffd98a' : '#8ff8ff');
     const cause = won ? 'THE RIVER PROVIDES' : this.lossCause === 'eel' ? 'AN EEL RUINED THE CATCH' : 'TOO MANY FISH SLIPPED AWAY';
@@ -1147,17 +1226,16 @@ export class Game {
     }
     button('retry', over, 'FISH AGAIN', at(0.22) + 36 + lines.length * 11);
 
-    // Settings (gear) and mute, top-left and inside the safe area, on the title and during play.
-    // Each is drawn at least 44 CSS px square, so art, hit area and focus ring are one rectangle.
-    const controls = (this.mode === 'playing' && this.win === 0) || this.mode === 'paused' || this.mode === 'title';
-    const safe = this.safeTexels();
-    const size = Math.max(13, Math.ceil(44 / this.texelCss()));
+    // Settings (gear) and mute stay in the top-left corner, inside the safe area, on every screen:
+    // title, play, pause, the win and the results. Each is drawn at least 44 CSS px square, so art,
+    // hit area and focus ring are one rectangle.
+    const controls = this.mode !== 'loading';
     const px = safe.left + 3;
     const py = safe.top + 3;
     const inset = Math.floor((size - 9) / 2);
-    v.panel('ctl-gear-body', px, py, size, size, controls ? '#091a27' : null, 12);
+    v.panel('ctl-gear-body', px, py, size, size, controls ? '#091a27' : null, 18);
     v.icon('ctl-gear-icon', controls ? GEAR : null, px + inset, py + inset, '#99c8cd');
-    v.panel('ctl-mute-body', px + size + 2, py, size, size, controls ? '#091a27' : null, 12);
+    v.panel('ctl-mute-body', px + size + 2, py, size, size, controls ? '#091a27' : null, 18);
     v.icon(
       'ctl-mute-icon',
       controls ? (this.audio.isMuted ? SPEAKER_OFF : SPEAKER) : null,
@@ -1181,16 +1259,15 @@ export class Game {
   }
 
   private installTestHooks(): void {
-    const phaseIds = PHASES.map((p) => p.id);
-    const settle = (seconds: number, opts: { startPhase?: number; idle?: boolean } = {}): void => {
+    const stageIds = STAGES.map((p) => p.id);
+    const settle = (seconds: number, opts: { startStage?: number; idle?: boolean } = {}): void => {
       this.frozen = false;
-      this.startRun(opts.startPhase ?? 0);
+      this.startRun(opts.startStage ?? 0);
       this.autoplay = !opts.idle;
       const warm = 1.5;
       for (let t = 0; t < seconds - warm && this.sim.state.status === 'playing'; t += STEP) {
         this.sim.step(STEP, opts.idle ? { kind: 'none' } : trackerIntent(this.sim.state, this.config.net.radius));
-        for (const e of this.sim.drainEvents())
-          if (e.type === 'restStart' || e.type === 'phaseStart' || e.type === 'lose' || e.type === 'win') this.onEvent(e);
+        for (const e of this.sim.drainEvents()) if (e.type === 'stage' || e.type === 'lose' || e.type === 'win') this.onEvent(e);
       }
       // Everything caught so far has landed, except fish still in the net (they add when they land).
       this.basketWeight = this.sim.state.fish
@@ -1213,9 +1290,18 @@ export class Game {
           this.settingsOpen = false;
           this.setMode('title');
         } else if (name === 'active-play') settle(9);
-        else if (phase && phaseIds.includes(phase[1] ?? '')) settle(5, { startPhase: phaseIds.indexOf(phase[1] ?? '') });
-        else if (name === 'rest') settle(PHASES[0]!.length + 0.4);
-        else if (name === 'pause') {
+        else if (phase && stageIds.includes(phase[1] ?? '')) settle(5, { startStage: stageIds.indexOf(phase[1] ?? '') });
+        else if (name === 'speed-up' || name === 'rest') {
+          // The first speed-up, caught mid-surge with its sign up ('rest' is the old name for the
+          // moment between phases; there are no rests any more).
+          settle(9);
+          this.sim.state.caught = Math.max(this.sim.state.caught, this.config.speedUps[0]?.weight ?? 40);
+          this.basketWeight = this.sim.state.caught;
+          this.autoplay = true;
+          for (let i = 0; i < 26; i++) this.frame(STEP);
+          this.autoplay = false;
+          if (this.sim.state.stageIndex !== 1 || this.surge <= 0) throw new Error('speed-up not reached');
+        } else if (name === 'pause') {
           settle(9);
           this.setMode('paused');
         } else if (name === 'koi-scoop') {
@@ -1227,7 +1313,7 @@ export class Game {
           if (this.scoop === 0) throw new Error('koi-scoop not reached');
         } else if (name === 'eel-near') {
           // An eel passing just beside the net.
-          settle(5, { startPhase: 1 });
+          settle(5, { startStage: 1 });
           const lane = this.sim.state.net.lane;
           this.sim.debugSpawn('eel', lane > 0.5 ? lane - 0.3 : lane + 0.3, 0.86);
           for (let i = 0; i < 14; i++) this.frame(STEP);
@@ -1299,6 +1385,9 @@ export class Game {
       spawnAtNet: (kind: FishKind) => {
         this.sim.debugSpawn(kind, this.sim.state.net.lane, 0.93);
       },
+      audioLevel: () => this.audio.level(),
+      setAudioBeds: (on: boolean) => this.audio.setBeds(on),
+      openAdvancedAudio: (open: boolean) => this.panel.setAdvanced(open),
     };
   }
 
@@ -1306,12 +1395,16 @@ export class Game {
     const info = this.view.renderer.info;
     const s = this.sim.state;
     const { layout } = this.view;
+    // Output level now, and its recent peak (falls back over about a second) for polling tests.
+    const level = this.audio.level();
+    this.audioPeak = Math.max(level, this.audioPeak * 0.96);
     window.__THREE_GAME_DIAGNOSTICS__ = {
       frame: this.frameCount,
       elapsed: s.time,
       mode: this.mode,
-      phase: s.phase.id,
-      resting: s.resting,
+      phase: s.stage.id,
+      stage: s.stageIndex,
+      settings: this.mode === 'paused' || this.settingsOpen,
       status: s.status,
       lossCause: s.lossCause,
       caught: s.caught,
@@ -1347,6 +1440,9 @@ export class Game {
       quality: this.view.quality,
       winning: this.win > 0 && this.mode === 'playing',
       audio: this.audio.state,
+      audioLevel: level,
+      audioPeak: this.audioPeak,
+      fishNotes: this.audio.settings.enabled.notes,
       theme: this.audio.theme.id,
       rippleEncoding: this.view.ripples.byteEncoded ? 'byte' : 'half-float',
     };

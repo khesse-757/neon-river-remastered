@@ -239,11 +239,11 @@ const RIPPLE: Theme = {
 };
 
 export const THEMES: readonly Theme[] = [LANTERN, HERON, RIPPLE];
-/** The default until Kyle picks one on the ?audition page. */
-export const DEFAULT_THEME: Theme['id'] = 'lantern';
+/** The default until Kyle picks one on the ?audition page; players can switch it in Advanced audio. */
+export const DEFAULT_THEME: Theme['id'] = 'ripple';
 export const PHRASE_STEPS = 32;
 
-export const themeById = (id: string | null | undefined): Theme => THEMES.find((t) => t.id === id) ?? LANTERN;
+export const themeById = (id: string | null | undefined): Theme => THEMES.find((t) => t.id === id) ?? RIPPLE;
 
 export interface MelodyNote {
   readonly degree: number;

@@ -4,8 +4,11 @@ interface ThreeGameDiagnostics {
   frame: number;
   elapsed: number;
   mode: string;
+  /** Stage id (still-water, quickening, neon-rapids, bank-to-bank) and its index 0..3. */
   phase: string;
-  resting: boolean;
+  stage: number;
+  /** The settings panel is open (pause, or the gear on other screens). */
+  settings: boolean;
   status: string;
   lossCause: string | null;
   caught: number;
@@ -22,6 +25,10 @@ interface ThreeGameDiagnostics {
   quality: number;
   winning: boolean;
   audio: string;
+  /** RMS at the final output now, and its recent peak. */
+  audioLevel: number;
+  audioPeak: number;
+  fishNotes: boolean;
   theme: string;
   rippleEncoding: string;
 }
@@ -41,6 +48,12 @@ interface ThreeGameTestHooks {
   setAutoplay(enabled: boolean): void;
   /** Drop a fish just upstream of the net (video capture of the eel sequence). */
   spawnAtNet(kind: 'bluegill' | 'koi' | 'eel'): void;
+  /** RMS at the final audio output (after mute, mix, EQ and limiter). */
+  audioLevel(): number;
+  /** Music and ambience beds off or on, so a test can listen for one sound at a time. */
+  setAudioBeds(on: boolean): void;
+  /** Expand or collapse the Advanced audio section of the settings panel. */
+  openAdvancedAudio(open: boolean): void;
 }
 
 interface Window {

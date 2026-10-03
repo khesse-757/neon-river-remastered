@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, type FishKind, type PhaseSpec, type SimConfig } from './config';
+import { DEFAULT_CONFIG, type FishKind, type SimConfig, type StageSpec } from './config';
 import { createNet, stepNet, NO_INTENT, type NetIntent, type NetState } from './net';
 import type { River } from './river';
 import { createRng, type Rng } from './rng';
@@ -8,13 +8,14 @@ export type FishStatus = 'swimming' | 'scooped' | 'escaped';
 export interface Fish {
   readonly id: number;
   readonly kind: FishKind;
+  /** A fish keeps the lane it was spawned in. Only a scooped fish slides (into the net). */
   lane: number;
   prevLane: number;
   /** 0 at the far bend, 1 at the net rail; linear in time. */
   progress: number;
   prevProgress: number;
-  /** Progress per second. */
-  readonly speed: number;
+  /** Progress per second: the river's current, shared by every fish. */
+  speed: number;
   status: FishStatus;
   /** 1 -> 0 while being scooped into the net. */
   scoop: number;
@@ -26,9 +27,11 @@ export interface Fish {
 export type LossCause = 'eel' | 'escaped';
 
 export type SimEvent =
-  | { type: 'restStart'; next: PhaseSpec }
-  | { type: 'phaseStart'; phase: PhaseSpec; index: number }
+  /** The night's opening stage (index 0), then one per speed-up. Spawning never pauses for it. */
+  | { type: 'stage'; stage: StageSpec; index: number }
   | { type: 'telegraph'; lane: number; kind: FishKind }
+  /** A warned eel will not appear after all (a fairness guard turned it into a fish). */
+  | { type: 'telegraphCancel' }
   | { type: 'spawn'; fish: Fish }
   | { type: 'catch'; fish: Fish; weight: number; streak: number; caught: number }
   | { type: 'miss'; fish: Fish; weight: number; escaped: number }
@@ -39,14 +42,26 @@ export type SimEvent =
 
 export interface EmitterState {
   lane: number;
-  dir: 1 | -1;
-  swingLeft: number;
+  /** The current swing: an eased move from one lane to another. */
+  from: number;
+  to: number;
+  elapsed: number;
+  duration: number;
+  /** Seconds into the swing at which it turns back early (Infinity = it completes). */
+  reverseAt: number;
+  /** Bank to Bank: spawns left in the burst pinned at this bank, and bursts left in the run of them. */
+  pinFish: number;
+  pinBursts: number;
+  /** A burst starts as soon as the emitter reaches a bank. */
+  burstPending: boolean;
   spawnTimer: number;
   /** The next two spawns are rolled ahead so an eel can be announced a full lead early. */
   next: FishKind;
   afterNext: FishKind;
   telegraphed: boolean;
   afterTelegraphed: boolean;
+  /** Spawns rolled since the last eel. */
+  sinceEel: number;
 }
 
 export type RunStatus = 'playing' | 'won' | 'lost';
@@ -55,14 +70,11 @@ export interface SimState {
   time: number;
   status: RunStatus;
   lossCause: LossCause | null;
-  /** Index into the script of the current (or upcoming, during a rest) phase. */
-  phaseIndex: number;
-  phase: PhaseSpec;
-  resting: boolean;
-  /** 0..1 along the continuous ramp (time or weight, whichever is further). */
-  ramp: number;
-  /** Seconds left in the current rest or phase. */
-  phaseTimer: number;
+  /** 0 = Still Water; each speed-up adds one. */
+  stageIndex: number;
+  stage: StageSpec;
+  /** The current's speed multiplier; glides to the stage's speed after a speed-up. */
+  speed: number;
   emitter: EmitterState;
   net: NetState;
   fish: Fish[];
@@ -78,13 +90,16 @@ export interface SimOptions {
   readonly seed: number;
   readonly river: River;
   readonly config?: SimConfig;
-  /** Start the script at this phase (test hooks). */
-  readonly startPhase?: number;
+  /** Start the night at this stage (test hooks). */
+  readonly startStage?: number;
   /** Start without fish already in the river (unit tests). */
   readonly empty?: boolean;
 }
 
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+const WARM_STEP = 1 / 60;
+/** A swing never covers less than this, so the chain always moves. */
+const MIN_SWING = 0.18;
 
 export class Sim {
   /** Replaceable while running so the dev tune panel can change the pace live. */
@@ -94,27 +109,48 @@ export class Sim {
   private readonly rng: Rng;
   private events: SimEvent[] = [];
   private nextId = 1;
-  private lastSpawnLane: number | null = null;
+  private lastFishLane: number | null = null;
+  private lastFishTime = 0;
+  /** Seconds the emitter has run, warm-up included. */
+  private clock = 0;
   private eelSeen = false;
-  private scriptStep: number;
+  /** While the river is being pre-run, no eels are rolled: their warnings would never be seen. */
+  private warming = true;
 
   constructor(options: SimOptions) {
     this.config = options.config ?? DEFAULT_CONFIG;
     this.river = options.river;
     this.rng = createRng(options.seed);
-    this.scriptStep = options.startPhase ?? 0;
-    const phase = this.phaseForStep(this.scriptStep);
+    const { stages, speedUps, banks } = this.config;
+    const stageIndex = Math.min(stages.length - 1, Math.max(0, options.startStage ?? 0));
+    const stage = stages[stageIndex] as StageSpec;
+    const right = this.rng.next() < 0.5;
     this.state = {
-      time: 0,
+      // Starting later in the night (test hooks) puts the clock where that stage would begin.
+      time: stageIndex > 0 ? (speedUps[stageIndex - 1]?.seconds ?? 0) : 0,
       status: 'playing',
       lossCause: null,
-      phaseIndex: this.config.phases.indexOf(phase),
-      phase,
-      // A run opens mid-flow: no rest, and a few fish already on their way down.
-      resting: false,
-      ramp: 0,
-      phaseTimer: phase.length,
-      emitter: this.freshEmitter(phase),
+      stageIndex,
+      stage,
+      speed: stage.speed * this.config.tune.speed,
+      emitter: {
+        lane: right ? banks[0] : banks[1],
+        from: 0,
+        to: 0,
+        elapsed: 0,
+        duration: 1,
+        reverseAt: Infinity,
+        pinFish: 0,
+        pinBursts: 0,
+        burstPending: false,
+        // With `empty`, the first fish comes one period in instead of at once.
+        spawnTimer: options.empty ? stage.period / this.config.tune.density : 0,
+        next: 'bluegill',
+        afterNext: 'bluegill',
+        telegraphed: false,
+        afterTelegraphed: false,
+        sinceEel: 0,
+      },
       net: createNet(),
       fish: [],
       caught: 0,
@@ -124,14 +160,23 @@ export class Sim {
       catches: 0,
       misses: 0,
     };
-    this.events.push({ type: 'phaseStart', phase, index: this.state.phaseIndex });
+    this.startSwing(right ? 1 : -1);
+    const e = this.state.emitter;
+    e.next = this.rollKind();
+    e.afterNext = this.rollKind();
     if (!options.empty) {
-      for (const [progress, offset] of this.config.prefill) {
-        const fish = this.makeFish('bluegill', clamp01(this.state.emitter.lane + offset * this.state.emitter.dir), progress);
-        this.state.fish.push(fish);
-        this.lastSpawnLane = fish.lane;
+      // A night opens mid-flow: the river has already been running, so the first fish is close.
+      for (let t = 0; t < this.config.prefillSeconds; t += WARM_STEP) {
+        this.stepEmitter(WARM_STEP);
+        for (const fish of this.state.fish) {
+          fish.prevProgress = fish.progress;
+          fish.progress += this.currentSpeed() * WARM_STEP;
+        }
       }
+      this.events = [];
     }
+    this.warming = false;
+    this.events.unshift({ type: 'stage', stage, index: stageIndex });
   }
 
   /** Events since the last drain, oldest first. */
@@ -150,10 +195,9 @@ export class Sim {
       return;
     }
     s.time += dt;
-    s.ramp = clamp01(Math.max(s.time / this.config.ramp.seconds, s.caught / this.config.winWeight));
+    this.stepStage(dt);
     stepNet(s.net, intent, dt, this.config.net);
-    this.stepDirector(dt);
-    if (!s.resting) this.stepEmitter(dt);
+    this.stepEmitter(dt);
     this.advanceFish(dt, true);
   }
 
@@ -164,88 +208,128 @@ export class Sim {
     return fish;
   }
 
-  /** Current travel time, spawn period and sweep: the ramp, shaped by the phase and the tune panel. */
-  pace(): { travel: number; period: number; sweep: number; eelChance: number } {
-    const { ramp, tune } = this.config;
-    const phase = this.state.phase;
-    const r = this.state?.ramp ?? 0;
-    const mix = (pair: readonly [number, number]): number => pair[0] + (pair[1] - pair[0]) * r;
+  /** Current travel time, spawn period, bank-to-bank crossing time and eel share, with the tune panel applied. */
+  pace(): { travel: number; period: number; crossing: number; eelChance: number } {
+    const { tune, travel } = this.config;
+    const { stage, speed } = this.state;
     return {
-      travel: (mix(ramp.travel) * phase.travelMul) / tune.speed,
-      period: (mix(ramp.period) * phase.periodMul) / tune.density,
-      sweep: mix(ramp.sweep) * phase.sweepMul * tune.sweep,
-      eelChance: Math.min(0.9, phase.eelChance * tune.eel),
+      travel: travel / speed,
+      period: stage.period / tune.density,
+      crossing: stage.crossing / tune.sweep,
+      eelChance: Math.min(0.9, stage.eelChance * tune.eel),
     };
   }
 
-  private phaseForStep(step: number): PhaseSpec {
-    const { phases, loopPhases } = this.config;
-    if (step < phases.length) return phases[step] as PhaseSpec;
-    const loopIndex = loopPhases[(step - phases.length) % loopPhases.length] ?? 0;
-    return phases[loopIndex] as PhaseSpec;
+  /** Progress per second of every fish in the river. */
+  private currentSpeed(): number {
+    return this.state.speed / this.config.travel;
   }
 
-  private freshEmitter(phase: PhaseSpec): EmitterState {
-    const prev = this.state as SimState | undefined;
-    return {
-      lane: prev?.emitter.lane ?? 0.5,
-      dir: prev?.emitter.dir ?? (this.rng.next() < 0.5 ? 1 : -1),
-      swingLeft: this.rng.range(phase.swingMin, phase.swingMax),
-      // Long enough that an eel opening a phase still gets its full warning.
-      spawnTimer: this.config.telegraphLead + 0.05,
-      next: this.rollKind(phase),
-      afterNext: this.rollKind(phase),
-      telegraphed: false,
-      afterTelegraphed: false,
-    };
-  }
-
-  private stepDirector(dt: number): void {
+  /** Speed-ups fire on weight caught or on the clock, whichever comes first; the current then picks up. */
+  private stepStage(dt: number): void {
     const s = this.state;
-    s.phaseTimer -= dt;
-    if (s.phaseTimer > 0) return;
-    if (s.resting) {
-      s.resting = false;
-      s.phaseTimer += s.phase.length;
-      s.emitter = this.freshEmitter(s.phase);
-      this.events.push({ type: 'phaseStart', phase: s.phase, index: s.phaseIndex });
-    } else {
-      this.scriptStep += 1;
-      s.phase = this.phaseForStep(this.scriptStep);
-      s.phaseIndex = this.config.phases.indexOf(s.phase);
-      s.resting = true;
-      s.phaseTimer += this.config.restSeconds;
-      this.events.push({ type: 'restStart', next: s.phase });
+    const { speedUps, stages, tune, speedEase } = this.config;
+    for (let up = speedUps[s.stageIndex]; up && s.stageIndex < stages.length - 1; up = speedUps[s.stageIndex]) {
+      if (s.caught < up.weight && s.time < up.seconds) break;
+      s.stageIndex += 1;
+      s.stage = stages[s.stageIndex] as StageSpec;
+      this.events.push({ type: 'stage', stage: s.stage, index: s.stageIndex });
     }
+    const target = s.stage.speed * tune.speed;
+    s.speed += (target - s.speed) * (1 - Math.exp(-dt / speedEase));
   }
 
-  private rollKind(phase: PhaseSpec): FishKind {
+  private rollKind(): FishKind {
+    const { stage, emitter } = this.state;
     // Koi is rolled first, then eel, like the original's power-up / bad-fish order.
-    if (this.rng.next() < phase.koiChance) return 'koi';
-    if (this.rng.next() < Math.min(0.9, phase.eelChance * this.config.tune.eel)) return 'eel';
-    return 'bluegill';
+    const koi = this.rng.next() < stage.koiChance;
+    const eel = this.rng.next() < Math.min(0.9, stage.eelChance * this.config.tune.eel);
+    // Eels keep their distance from each other: "rare and well spaced" in Still Water.
+    if (!koi && eel && !this.warming && emitter.sinceEel >= stage.eelSpacing) {
+      emitter.sinceEel = 0;
+      return 'eel';
+    }
+    emitter.sinceEel += 1;
+    return koi ? 'koi' : 'bluegill';
+  }
+
+  /** Begin an eased swing from the emitter's lane toward one bank. */
+  private startSwing(dir: 1 | -1): void {
+    const { stage, emitter } = this.state;
+    const [lo, hi] = this.config.banks;
+    let d = dir;
+    // Already at that bank (after a reversal near it): go the other way.
+    if (Math.abs((d > 0 ? hi : lo) - emitter.lane) < MIN_SWING) d = d > 0 ? -1 : 1;
+    const full = Math.abs((d > 0 ? hi : lo) - emitter.lane);
+    const share = emitter.burstPending ? 1 : stage.swingMin + (1 - stage.swingMin) * this.rng.next();
+    const distance = Math.min(full, Math.max(MIN_SWING, full * share));
+    emitter.from = emitter.lane;
+    emitter.to = emitter.lane + d * distance;
+    emitter.elapsed = 0;
+    // Swings share one peak speed, so a short swing is a quick one.
+    emitter.duration = Math.max(0.4, (stage.crossing * distance) / (hi - lo));
+    const turn = this.rng.next();
+    const at = this.rng.next();
+    emitter.reverseAt =
+      !emitter.burstPending && turn < 1 - Math.exp(-stage.reversals * emitter.duration) ? emitter.duration * (0.3 + 0.4 * at) : Infinity;
+  }
+
+  /** Move the emitter along its pattern for this stage. */
+  private moveEmitter(dt: number): void {
+    const { stage, emitter } = this.state;
+    if (emitter.pinFish > 0) return; // Pinned at a bank until the burst has spawned.
+    emitter.elapsed += dt * this.config.tune.sweep;
+    const dir: 1 | -1 = emitter.to >= emitter.from ? 1 : -1;
+    if (emitter.elapsed >= emitter.reverseAt) {
+      // A sudden reversal: the chain turns back mid-river.
+      this.startSwing(dir > 0 ? -1 : 1);
+      return;
+    }
+    const t = Math.min(1, emitter.elapsed / emitter.duration);
+    emitter.lane = emitter.from + (emitter.to - emitter.from) * (0.5 - 0.5 * Math.cos(Math.PI * t));
+    if (t < 1) return;
+    const [lo, hi] = this.config.banks;
+    const atBank = Math.min(Math.abs(emitter.lane - lo), Math.abs(emitter.lane - hi)) < 0.01;
+    if (stage.bursts && (emitter.burstPending || this.rng.next() < stage.bursts.share)) {
+      if (atBank) {
+        // Bank to Bank: a burst here, then straight across for another.
+        emitter.burstPending = false;
+        emitter.lane = Math.abs(emitter.lane - lo) < Math.abs(emitter.lane - hi) ? lo : hi;
+        emitter.pinBursts = this.rng.next() < 0.3 ? 3 : 2;
+        emitter.pinFish = this.burstSize();
+        return;
+      }
+      emitter.burstPending = true;
+      this.startSwing(dir);
+      return;
+    }
+    this.startSwing(dir > 0 ? -1 : 1);
+  }
+
+  private burstSize(): number {
+    const [min, max] = this.state.stage.bursts?.fish ?? [2, 3];
+    return min + Math.floor(this.rng.next() * (max - min + 1));
+  }
+
+  /** A burst fish has spawned: when the burst is done, jump to the other bank or go back to sweeping. */
+  private afterPinnedSpawn(): void {
+    const { emitter } = this.state;
+    const [lo, hi] = this.config.banks;
+    emitter.pinFish -= 1;
+    if (emitter.pinFish > 0) return;
+    emitter.pinBursts -= 1;
+    const left = Math.abs(emitter.lane - lo) < Math.abs(emitter.lane - hi);
+    if (emitter.pinBursts > 0) {
+      emitter.lane = left ? hi : lo;
+      emitter.pinFish = this.burstSize();
+    } else this.startSwing(left ? 1 : -1);
   }
 
   private stepEmitter(dt: number): void {
-    const { phase, emitter } = this.state;
+    const { emitter } = this.state;
     const pace = this.pace();
-    if (phase.pinned) {
-      // Pinned to one bank, then the other.
-      const side = Math.floor((phase.length - this.state.phaseTimer) / phase.pinned) % 2;
-      emitter.lane = side === 0 ? 0.12 : 0.88;
-    } else {
-      emitter.lane += emitter.dir * pace.sweep * dt;
-      // Reflect off the banks; a fast sweep can cross the river more than once per step.
-      while (emitter.lane < 0 || emitter.lane > 1) {
-        emitter.lane = emitter.lane < 0 ? -emitter.lane : 2 - emitter.lane;
-        emitter.dir = emitter.dir === 1 ? -1 : 1;
-      }
-    }
-    emitter.swingLeft -= dt;
-    if (emitter.swingLeft <= 0) {
-      emitter.dir = emitter.dir === 1 ? -1 : 1;
-      emitter.swingLeft += this.rng.range(phase.swingMin, phase.swingMax);
-    }
+    this.clock += dt;
+    this.moveEmitter(dt);
 
     emitter.spawnTimer -= dt;
     const lead = this.config.telegraphLead;
@@ -259,12 +343,14 @@ export class Sim {
       this.events.push({ type: 'telegraph', lane: emitter.lane, kind: 'eel' });
     }
     if (emitter.spawnTimer <= 0) {
-      this.spawn(emitter.next, emitter.lane);
+      const pinned = emitter.pinFish > 0;
+      this.spawn(emitter.next, emitter.lane, pinned);
       emitter.spawnTimer += pace.period;
       emitter.next = emitter.afterNext;
       emitter.telegraphed = emitter.afterTelegraphed;
-      emitter.afterNext = this.rollKind(phase);
+      emitter.afterNext = this.rollKind();
       emitter.afterTelegraphed = false;
+      if (pinned) this.afterPinnedSpawn();
     }
   }
 
@@ -278,7 +364,7 @@ export class Sim {
       prevLane: lane,
       progress,
       prevProgress: progress,
-      speed: 1 / this.pace().travel,
+      speed: this.currentSpeed(),
       status: 'swimming',
       scoop: 1,
       closest: Infinity,
@@ -286,25 +372,26 @@ export class Sim {
     };
   }
 
-  private spawn(kind: FishKind, emitterLane: number): void {
+  private spawn(kind: FishKind, emitterLane: number, pinned: boolean): void {
     const { fairness } = this.config;
     let lane = emitterLane;
     let finalKind = kind;
 
-    // (a) A non-eel that would appear too far from the previous spawn is pulled to the midpoint.
-    // The allowed jump shrinks with the spawn period so a capped net can still follow the chain.
-    const pace = this.pace();
-    const maxJump = Math.min(fairness.maxJump, this.config.net.cap * pace.period * fairness.reachShare);
-    if (finalKind !== 'eel' && this.lastSpawnLane !== null && Math.abs(lane - this.lastSpawnLane) > maxJump) {
-      lane = this.lastSpawnLane + Math.sign(lane - this.lastSpawnLane) * maxJump;
+    // (a) While sweeping, the chain may not outrun the net: a non-eel stays within a share of what
+    // the capped net covers in the time since the last one. The sweep itself keeps well inside
+    // this; it only bites when the tune panel pushes the pace. A burst's jump across the river is
+    // the pattern.
+    const maxStep = this.config.net.cap * (this.clock - this.lastFishTime) * fairness.reachShare;
+    if (!pinned && finalKind !== 'eel' && this.lastFishLane !== null && Math.abs(lane - this.lastFishLane) > maxStep) {
+      lane = this.lastFishLane + Math.sign(lane - this.lastFishLane) * maxStep;
     }
 
     // (b) Eels and fish that reach the net within the window must be a gap apart.
-    const speed = 1 / pace.travel;
+    const speed = this.currentSpeed();
     const arrival = 1 / speed;
     const conflicts = this.state.fish.filter((other) => {
       if (other.status !== 'swimming' || (other.kind === 'eel') === (finalKind === 'eel')) return false;
-      const otherArrival = (1 - other.progress) / other.speed;
+      const otherArrival = (1 - other.progress) / speed;
       return Math.abs(otherArrival - arrival) <= fairness.eelWindow;
     });
     const clear = (candidate: number): boolean => conflicts.every((o) => Math.abs(o.lane - candidate) >= fairness.eelGap - 1e-9);
@@ -313,13 +400,19 @@ export class Sim {
       const options = conflicts.flatMap((o) => [o.lane - fairness.eelGap, o.lane + fairness.eelGap]);
       const valid = options.filter((c) => c >= 0 && c <= 1 && clear(c)).sort((p, q) => Math.abs(p - lane) - Math.abs(q - lane));
       if (valid[0] !== undefined) lane = valid[0];
-      else if (finalKind === 'eel') finalKind = 'bluegill';
-      else return; // No fair place for this fish: skip the spawn rather than trap the player.
+      else if (finalKind === 'eel') {
+        // The warned eel becomes a fish: call the warning off.
+        finalKind = 'bluegill';
+        this.events.push({ type: 'telegraphCancel' });
+      } else return; // No fair place for this fish: skip the spawn rather than trap the player.
     }
 
     const fish = this.makeFish(finalKind, clamp01(lane), 0);
     this.state.fish.push(fish);
-    this.lastSpawnLane = fish.lane;
+    if (finalKind !== 'eel') {
+      this.lastFishLane = fish.lane;
+      this.lastFishTime = this.clock;
+    }
     this.events.push({ type: 'spawn', fish });
   }
 
@@ -333,6 +426,8 @@ export class Sim {
       fish.prevProgress = fish.progress;
       fish.prevLane = fish.lane;
 
+      // One current carries every fish, so a speed-up never bunches the chain.
+      fish.speed = this.currentSpeed();
       if (fish.status === 'scooped') {
         // Slow to a quarter speed, slide to the net's lane, and shrink into it.
         fish.progress += fish.speed * 0.25 * dt;

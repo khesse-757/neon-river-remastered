@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Records short active-play videos and measures frame rate through the test hooks.
 //   node scripts/record.mjs --url http://127.0.0.1:4188 --out docs/media/gate-1.5 [--seconds 9] [--query "actors=3x"] [--name play]
-import { mkdirSync, renameSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, renameSync, rmSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 const args = Object.fromEntries(
@@ -56,7 +57,7 @@ for (const [mode, options] of Object.entries(VIEWS)) {
     stats = await page.evaluate(async (seconds) => {
       const hooks = window.__THREE_GAME_TEST_HOOKS__;
       await hooks.seed(42);
-      await hooks.setState('phase.lantern-koi');
+      await hooks.setState('phase.neon-rapids');
       hooks.setAutoplay(true);
       const times = [];
       let calls = 0;
@@ -97,6 +98,35 @@ for (const [mode, options] of Object.entries(VIEWS)) {
   await context.close();
   const file = `${out}/${args.name ?? 'active-play'}-${mode}.webm`;
   renameSync(await video.path(), file);
-  console.log(`${file} ${JSON.stringify(stats)}`);
+  // Re-encode to H.264 .mp4 so the clip opens in QuickTime; keep the .webm only if ffmpeg is missing.
+  let saved = file;
+  try {
+    const mp4 = file.replace(/\.webm$/, '.mp4');
+    const even = 'scale=trunc(iw/2)*2:trunc(ih/2)*2';
+    execFileSync('ffmpeg', [
+      '-y',
+      '-loglevel',
+      'error',
+      '-i',
+      file,
+      '-vf',
+      even,
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-crf',
+      '20',
+      '-movflags',
+      '+faststart',
+      '-an',
+      mp4,
+    ]);
+    rmSync(file);
+    saved = mp4;
+  } catch (error) {
+    console.warn(`ffmpeg re-encode failed, kept ${file}: ${String(error).split('\n')[0]}`);
+  }
+  console.log(`${saved} ${JSON.stringify(stats)}`);
 }
 await browser.close();

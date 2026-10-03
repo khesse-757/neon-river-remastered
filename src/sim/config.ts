@@ -4,35 +4,38 @@
  */
 export type FishKind = 'bluegill' | 'koi' | 'eel';
 
-/** A phase shapes the pattern; the continuous ramp sets the base speed, density and sweep. */
-export interface PhaseSpec {
+/**
+ * One of the four stages of the night. The emitter sweeps the river in eased swings (a sine in
+ * Still Water); each speed-up moves to the next stage without pausing the spawns.
+ */
+export interface StageSpec {
   readonly id: string;
   readonly name: string;
-  readonly length: number;
-  /** Multipliers on the ramp's sweep, spawn period and travel time. */
-  readonly sweepMul: number;
-  readonly periodMul: number;
-  readonly travelMul: number;
+  /** Fish speed, as a multiple of the base travel time's speed. */
+  readonly speed: number;
+  /** Seconds between spawns. */
+  readonly period: number;
+  /** Seconds for the emitter to cross the river bank to bank. */
+  readonly crossing: number;
+  /** A swing covers between this share and all of the way to the far bank (1 = always bank to bank). */
   readonly swingMin: number;
-  readonly swingMax: number;
+  /** Sudden mid-swing reversals per second. */
+  readonly reversals: number;
   readonly eelChance: number;
   readonly koiChance: number;
-  /** Pin the emitter to alternating banks, switching every this many seconds. */
-  readonly pinned?: number;
+  /** Fewest spawns between two eels. */
+  readonly eelSpacing: number;
+  /**
+   * Bank to Bank: at the end of a swing, with probability `share`, the emitter pins to a bank for a
+   * burst of `fish` spawns, then jumps straight to the other bank for another.
+   */
+  readonly bursts?: { readonly share: number; readonly fish: readonly [number, number] };
 }
 
-/**
- * The continuous ramp. Progress runs 0..1 on whichever is further along: elapsed time over
- * `seconds`, or weight caught over the goal. Each pair is [start, end].
- */
-export interface RampSpec {
+/** A speed-up fires at this much weight caught, or at this many seconds, whichever comes first. */
+export interface SpeedUpSpec {
+  readonly weight: number;
   readonly seconds: number;
-  /** Seconds from the far bend to the net. */
-  readonly travel: readonly [number, number];
-  /** Seconds between spawns. */
-  readonly period: readonly [number, number];
-  /** Emitter sweep, river-widths per second. */
-  readonly sweep: readonly [number, number];
 }
 
 /** Live multipliers from the dev `?tune` panel. All 1 in a normal run. */
@@ -46,7 +49,6 @@ export interface TuneSpec {
 export interface SimConfig {
   readonly winWeight: number;
   readonly maxEscaped: number;
-  readonly restSeconds: number;
   readonly weights: Readonly<Record<FishKind, number>>;
   /** Hitbox radii. The eel's is already scaled to ~85% of its visual. */
   readonly radii: Readonly<Record<FishKind, number>>;
@@ -61,9 +63,7 @@ export interface SimConfig {
     readonly followGain: number;
   };
   readonly fairness: {
-    /** Non-eel spawns further than this from the previous spawn are pulled to the midpoint. */
-    readonly maxJump: number;
-    /** A non-eel may jump at most this share of what the net can cover in one spawn period. */
+    /** While sweeping, a non-eel may be at most this share of the net's reach in one spawn period from the last one. */
     readonly reachShare: number;
     /** Eels and fish arriving within this many seconds must be `eelGap` apart. */
     readonly eelWindow: number;
@@ -76,68 +76,99 @@ export interface SimConfig {
   readonly scoopSeconds: number;
   /** Progress past the rail at which a fish is gone under the bridge. */
   readonly exitProgress: number;
-  readonly ramp: RampSpec;
+  /** Seconds from the far bend to the net at speed 1. */
+  readonly travel: number;
+  /** Time constant of the current picking up speed at a speed-up. */
+  readonly speedEase: number;
+  /** The lanes the emitter turns at: [left bank, right bank]. */
+  readonly banks: readonly [number, number];
+  /** The river is run for this long before a night starts, so fish are already on their way down. */
+  readonly prefillSeconds: number;
   readonly tune: TuneSpec;
-  /** Fish already in the river when a run starts: [progress, lane offset from the emitter]. */
-  readonly prefill: readonly (readonly [number, number])[];
-  /** How long the phase banner shows (render side); spawning resumes after `restSeconds`. */
+  /** How long the stage banner shows (render side). Spawning never waits for it. */
   readonly bannerSeconds: number;
-  readonly phases: readonly PhaseSpec[];
-  /** Phase indices to cycle through once the script runs out. */
-  readonly loopPhases: readonly number[];
+  readonly stages: readonly StageSpec[];
+  /** One fewer than the stages: speed-up n moves from stage n to stage n + 1. */
+  readonly speedUps: readonly SpeedUpSpec[];
 }
 
-const swing = { swingMin: 0.5, swingMax: 2 };
-const base = { sweepMul: 1, periodMul: 1, travelMul: 1, ...swing };
-
 /**
- * "One Night on the River". The whole night runs on a single emitter for now (pinned banks in
- * Twin Banks); the second emitter for Braided Stream is Gate 2. After Moonrise the script loops
- * the last four phases until the run ends.
+ * "One Night on the River": Still Water, three speed-ups, and Bank to Bank until 200 lb.
+ * Each speed-up is +12% fish speed, denser spawns, a faster sweep and more randomness.
  */
-export const PHASES: readonly PhaseSpec[] = [
-  { ...base, id: 'still-water', name: 'Still Water', length: 11, sweepMul: 0.8, eelChance: 0.22, koiChance: 0.03 },
-  { ...base, id: 'first-spark', name: 'First Spark', length: 12, eelChance: 0.34, koiChance: 0.04 },
-  { ...base, id: 'lantern-koi', name: 'Lantern Koi', length: 10, sweepMul: 1.6, periodMul: 1.25, eelChance: 0.28, koiChance: 0.14 },
-  { ...base, id: 'twin-banks', name: 'Twin Banks', length: 9, pinned: 3, periodMul: 1.2, eelChance: 0.24, koiChance: 0.08 },
-  { ...base, id: 'rising-tide', name: 'Rising Tide', length: 14, periodMul: 0.92, eelChance: 0.36, koiChance: 0.04 },
-  { ...base, id: 'neon-rapids', name: 'Neon Rapids', length: 14, sweepMul: 1.4, eelChance: 0.38, koiChance: 0.04 },
-  { ...base, id: 'eel-storm', name: 'Eel Storm', length: 10, periodMul: 0.9, eelChance: 0.66, koiChance: 0.1 },
+export const STAGES: readonly StageSpec[] = [
   {
-    ...base,
-    id: 'braided-stream',
-    name: 'Braided Stream',
-    length: 12,
-    sweepMul: 1.3,
-    swingMin: 0.3,
-    swingMax: 0.9,
-    periodMul: 0.93,
-    eelChance: 0.5,
-    koiChance: 0.05,
+    id: 'still-water',
+    name: 'Still Water',
+    speed: 1,
+    period: 0.9,
+    crossing: 4,
+    swingMin: 1,
+    reversals: 0,
+    eelChance: 0.067,
+    koiChance: 0.08,
+    eelSpacing: 5,
   },
-  { ...base, id: 'moonrise', name: 'Moonrise', length: 16, periodMul: 0.93, sweepMul: 1, eelChance: 0.52, koiChance: 0.06 },
+  {
+    id: 'quickening',
+    name: 'Quickening',
+    speed: 1.12,
+    period: 0.74,
+    crossing: 3.0,
+    swingMin: 0.55,
+    reversals: 0.12,
+    eelChance: 0.22,
+    koiChance: 0.08,
+    eelSpacing: 2,
+  },
+  {
+    id: 'neon-rapids',
+    name: 'Neon Rapids',
+    speed: 1.254,
+    period: 0.62,
+    crossing: 1.8,
+    swingMin: 0.4,
+    reversals: 0.3,
+    eelChance: 0.4,
+    koiChance: 0.08,
+    eelSpacing: 1,
+  },
+  {
+    id: 'bank-to-bank',
+    name: 'Bank to Bank',
+    speed: 1.405,
+    period: 0.5,
+    crossing: 1.15,
+    swingMin: 0.4,
+    reversals: 0.4,
+    eelChance: 0.5,
+    koiChance: 0.07,
+    eelSpacing: 0,
+    bursts: { share: 0.65, fish: [2, 4] },
+  },
 ];
 
 export const DEFAULT_CONFIG: SimConfig = {
   winWeight: 200,
   maxEscaped: 20,
-  restSeconds: 0.75,
   bannerSeconds: 1.6,
-  ramp: { seconds: 135, travel: [3.0, 1.9], period: [0.62, 0.42], sweep: [0.8, 3.0] },
+  travel: 3.0,
+  speedEase: 0.25,
+  banks: [0.08, 0.92],
+  prefillSeconds: 1.4,
   tune: { speed: 1, density: 1, sweep: 1, eel: 1 },
-  prefill: [
-    [0.42, 0],
-    [0.24, 0.07],
-    [0.06, 0.14],
-  ],
   weights: { bluegill: 1, koi: 5, eel: 0 },
   radii: { bluegill: 0.035, koi: 0.045, eel: 0.032 },
   net: { radius: 0.11, cap: 2.2, accel: 18, damping: 14, followGain: 14 },
-  fairness: { maxJump: 0.8, reachShare: 0.4, eelWindow: 0.35, eelGap: 0.4 },
+  fairness: { reachShare: 0.5, eelWindow: 0.35, eelGap: 0.4 },
   telegraphLead: 0.6,
   nearMissMargin: 0.06,
   scoopSeconds: 0.28,
   exitProgress: 1.07,
-  phases: PHASES,
-  loopPhases: [5, 6, 7, 8],
+  stages: STAGES,
+  speedUps: [
+    { weight: 40, seconds: 35 },
+    { weight: 90, seconds: 65 },
+    { weight: 140, seconds: 95 },
+  ],
 };

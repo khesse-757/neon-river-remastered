@@ -19,7 +19,20 @@ async function touchDrag(page: Page, from: [number, number], to: [number, number
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
+/** The gear and the mute button are on screen, top-left, in every mode. */
+async function expectCornerControls(page: Page, where: string): Promise<void> {
+  for (const id of ['#btn-settings', '#btn-mute']) {
+    const box = await page.locator(id).boundingBox();
+    expect(box, `${id} on ${where}`).not.toBeNull();
+    expect(box!.x, `${id} on ${where}`).toBeLessThan(120);
+    expect(box!.y, `${id} on ${where}`).toBeLessThan(80);
+    expect(Math.min(box!.width, box!.height), `${id} on ${where}`).toBeGreaterThanOrEqual(44);
+  }
+}
+
 test('boots, plays through real input, loses to an eel, and retries', async ({ page }, testInfo) => {
+  // Software-rendered CI runners need most of two minutes for this walk through the game.
+  test.setTimeout(180_000);
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -36,6 +49,7 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
     buckets.add((((shot.data[i] ?? 0) >> 4) << 8) | (((shot.data[i + 1] ?? 0) >> 4) << 4) | ((shot.data[i + 2] ?? 0) >> 4));
   expect(buckets.size).toBeGreaterThan(24);
 
+  await expectCornerControls(page, 'title');
   const mobile = testInfo.project.name.includes('mobile');
   if (mobile) await page.locator('#btn-start').tap();
   else await page.locator('#btn-start').click();
@@ -61,6 +75,8 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
     await expect.poll(() => lane(page)).toBeLessThan(0.65);
   }
 
+  await expectCornerControls(page, 'play');
+
   // Fish arrive and can be caught.
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setAutoplay(true));
   await expect.poll(async () => (await diag(page))?.caught ?? 0, { timeout: 45_000 }).toBeGreaterThan(0);
@@ -73,6 +89,34 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
   const frozenAt = (await diag(page))?.elapsed;
   await page.waitForTimeout(250);
   expect((await diag(page))?.elapsed).toBe(frozenAt);
+  await expectCornerControls(page, 'pause');
+
+  // Settings: Fish Notes start off; the Advanced section expands, every control in it is a
+  // 44 px target, and a change applies at once and is saved.
+  const tap = (selector: string) => (mobile ? page.locator(selector).tap() : page.locator(selector).click());
+  expect((await diag(page))?.fishNotes).toBe(false);
+  await expect(page.locator('#set-notes')).not.toBeChecked();
+  await tap('#set-notes');
+  await expect.poll(async () => (await diag(page))?.fishNotes).toBe(true);
+  await tap('#set-advanced');
+  await expect(page.locator('#set-reset')).toHaveCount(1);
+  const sizes = await page
+    .locator('#settings-scroll input, #settings-scroll button')
+    .evaluateAll((nodes) => nodes.map((n) => [n.id, n.getBoundingClientRect().width, n.getBoundingClientRect().height] as const));
+  expect(sizes.length).toBeGreaterThanOrEqual(25);
+  for (const [id, w, h] of sizes) expect(Math.min(w, h), id).toBeGreaterThanOrEqual(44);
+  await page.locator('#set-eq').scrollIntoViewIfNeeded();
+  await tap('#set-eq');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('neonriver2_audio_v2') ?? '{}') as Record<string, unknown>);
+  expect(saved.eq).toBe('warm');
+  expect(saved.bass).toBe(3);
+  expect((saved.enabled as Record<string, boolean>).notes).toBe(true);
+  await page.locator('#set-reset').scrollIntoViewIfNeeded();
+  await tap('#set-reset');
+  await expect.poll(async () => (await diag(page))?.fishNotes).toBe(false);
+  // The whole pause-and-settings screen stays inside the mobile draw-call budget.
+  expect((await diag(page))?.renderer.calls ?? 999).toBeLessThan(100);
+  await page.locator('#settings-scroll').evaluate((node) => (node.scrollTop = 0));
   if (mobile) await page.locator('#btn-resume').tap();
   else await page.keyboard.press('Escape');
   await expect.poll(() => mode(page)).toBe('playing');
@@ -89,6 +133,7 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('loss-eel'));
   await expect.poll(() => mode(page)).toBe('over');
   expect((await diag(page))?.lossCause).toBe('eel');
+  await expectCornerControls(page, 'results');
   await expect(page.locator('#status')).toContainText('eel');
   if (mobile) await page.locator('#btn-retry').tap();
   else await page.keyboard.press('Enter');

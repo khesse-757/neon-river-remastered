@@ -56,6 +56,8 @@ export interface FrameView {
   readonly warm: number;
   /** Far-layer parallax in texels. */
   readonly drift: number;
+  /** The fisherman lifted off the deck, in whole texels (the win cheer). */
+  readonly hop: number;
 }
 
 /** How the 3D layer is rendered: at device pixels, or at three pixels per painting texel. */
@@ -470,6 +472,44 @@ export class SceneRenderer {
     item.mesh.visible = true;
   }
 
+  /**
+   * A whole panel composed on a 2D canvas (one texel per canvas pixel), drawn as a single quad.
+   * `version` changes when the canvas has been redrawn.
+   */
+  sheet(id: string, canvas: HTMLCanvasElement | null, x = 0, y = 0, version = 0, order = 15): void {
+    let item = this.ui.get(id);
+    if (!canvas) {
+      if (item) item.mesh.visible = false;
+      return;
+    }
+    if (!item) {
+      const material = this.quadMaterial(this.white, false);
+      const mesh = new THREE.Mesh(this.quad01, material);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = order;
+      this.uiScene.add(mesh);
+      item = { mesh, material, text: '' };
+      this.ui.set(id, item);
+    }
+    const size = `${canvas.width}x${canvas.height}`;
+    const [was, drawn] = item.text.split('@');
+    let texture = item.material.uniforms.uMap!.value as THREE.Texture;
+    if (was !== size) {
+      if (texture !== this.white) texture.dispose();
+      texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      // Row 0 of the canvas is the top of the quad, and its colors go to the screen untouched.
+      texture.flipY = false;
+      texture.colorSpace = THREE.NoColorSpace;
+      item.material.uniforms.uMap!.value = texture;
+    } else if (drawn !== String(version)) texture.needsUpdate = true;
+    item.text = `${size}@${version}`;
+    (item.material.uniforms.uRect!.value as THREE.Vector4).set(Math.round(x), Math.round(y), canvas.width, canvas.height);
+    item.mesh.visible = true;
+  }
+
   /** Flat rectangle in target texels (HUD tablet, banner board, buttons). */
   panel(id: string, x: number, y: number, w: number, h: number, hex: string | null, order = 10): void {
     let item = this.ui.get(id);
@@ -545,6 +585,8 @@ export class SceneRenderer {
     man.uLean!.value = view.lean;
     man.uJolt!.value = view.jolt;
     man.uLight!.value = 0.3 * view.lantern;
+    const f = this.assets.fishermanRect;
+    (man.uRect!.value as THREE.Vector4).y = layout.originY + f.y - Math.round(view.hop);
 
     this.fish.update(view.fish);
     this.airFish.update(view.airFish);

@@ -121,22 +121,30 @@ export function installDevTools(game: Game, openTune = false): void {
   const gui = new GUI({ title: 'Neon River dev' });
   gui.close();
 
-  // ?tune: live pace multipliers. On its own it is a compact strip docked under the painting, so
-  // the river stays visible and the start button stays reachable on a phone.
+  // ?tune: live pace multipliers. On its own it is a compact strip docked in the top-right corner,
+  // over the sky: even open it never reaches the net, on a small phone or in landscape. It starts
+  // collapsed to its title bar and collapses again as soon as the game is touched.
   const tune = { ...game.config.tune, values: '' };
   const tuneGui = openTune ? new GUI({ title: 'tune pace', autoPlace: false, width: 320 }) : gui.addFolder('tune (pace)');
   if (openTune) {
     gui.hide();
     const style = document.createElement('style');
     style.textContent =
-      '#tune-dock{position:fixed;left:50%;bottom:env(safe-area-inset-bottom,0);transform:translateX(-50%);z-index:15;max-width:100vw}' +
-      '#tune-dock .lil-gui{--widget-height:30px;--spacing:4px;--font-size:13px;--input-font-size:13px;--name-width:34%;width:min(340px,100vw)}' +
-      '#tune-dock .lil-gui .lil-controller{min-height:34px}';
+      '#tune-dock{position:fixed;right:env(safe-area-inset-right,0);top:env(safe-area-inset-top,0);z-index:15;max-width:calc(100vw - 104px)}' +
+      '#tune-dock .lil-gui{--widget-height:26px;--spacing:3px;--font-size:12px;--input-font-size:12px;--name-width:34%;width:min(300px,calc(100vw - 104px));max-height:42vh;overflow-y:auto}' +
+      '#tune-dock .lil-gui .lil-controller{min-height:28px}';
     const dock = document.createElement('div');
     dock.id = 'tune-dock';
     dock.append(tuneGui.domElement);
     document.head.append(style);
     document.body.append(dock);
+    window.addEventListener(
+      'pointerdown',
+      (event) => {
+        if (!dock.contains(event.target as Node)) tuneGui.close();
+      },
+      true,
+    );
   }
   const show = (): void => {
     const { speed, density, sweep, eel } = tune;

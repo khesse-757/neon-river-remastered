@@ -12,7 +12,7 @@ import { Sim } from '../src/sim/sim';
 
 const DT = 1 / 60;
 const LIMIT = 360;
-const MARKS = [15, 30, 40, 60, 75, 90, 105, 120, 135, 150, 180];
+const MARKS = [15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180];
 const arg = (name: string, fallback: number): number => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? Number(process.argv[i + 1]) : fallback;
@@ -23,7 +23,14 @@ interface Run {
   won: boolean;
   time: number;
   cause: string | null;
-  phase: string;
+  stage: string;
+  /** Seconds at which each speed-up fired (missing if the run ended first). */
+  speedUps: number[];
+  /** Longest time without a spawn, and seconds with nothing in the last 35% of the river. */
+  maxGap: number;
+  emptyZone: number;
+  /** Largest lane step between consecutive catchable spawns while sweeping (bank jumps excluded). */
+  maxStep: number;
   caught: number;
   escaped: number;
   bestStreak: number;
@@ -48,9 +55,25 @@ function play(seed: number, pick: (sim: Sim) => NetIntent): Run {
   const sim = new Sim({ seed, river, config: DEFAULT_CONFIG });
   const curve: number[] = [];
   let firstCatch: number | null = null;
+  const speedUps: number[] = [];
+  let lastSpawn = 0;
+  let maxGap = 0;
+  let emptyZone = 0;
+  let lastLane: number | null = null;
+  let maxStep = 0;
   while (sim.state.status === 'playing' && sim.state.time < LIMIT) {
+    const pinned = sim.state.emitter.pinFish > 0;
     sim.step(DT, pick(sim));
-    sim.drainEvents();
+    for (const e of sim.drainEvents()) {
+      if (e.type === 'stage' && e.index > 0) speedUps.push(sim.state.time);
+      if (e.type !== 'spawn') continue;
+      maxGap = Math.max(maxGap, sim.state.time - lastSpawn);
+      lastSpawn = sim.state.time;
+      if (e.fish.kind === 'eel') continue;
+      if (lastLane !== null && !pinned) maxStep = Math.max(maxStep, Math.abs(e.fish.lane - lastLane));
+      lastLane = e.fish.lane;
+    }
+    if (!sim.state.fish.some((f) => f.status === 'swimming' && f.progress >= 0.65 && f.progress <= 1)) emptyZone += DT;
     if (firstCatch === null && sim.state.caught > 0) firstCatch = sim.state.time;
     while (curve.length < MARKS.length && sim.state.time >= (MARKS[curve.length] ?? Infinity)) curve.push(sim.state.caught);
   }
@@ -62,7 +85,11 @@ function play(seed: number, pick: (sim: Sim) => NetIntent): Run {
     won: s.status === 'won',
     time: s.time,
     cause: s.lossCause,
-    phase: s.phase.id,
+    stage: s.stage.id,
+    speedUps,
+    maxGap,
+    emptyZone,
+    maxStep,
     caught: s.caught,
     escaped: s.escaped,
     bestStreak: s.bestStreak,
@@ -76,7 +103,7 @@ function summarize(name: string, runs: Run[]): Record<string, unknown> {
   const wins = runs.filter((r) => r.won);
   const losses = runs.filter((r) => !r.won);
   const byPhase: Record<string, number> = {};
-  for (const r of losses) byPhase[r.phase] = (byPhase[r.phase] ?? 0) + 1;
+  for (const r of losses) byPhase[r.stage] = (byPhase[r.stage] ?? 0) + 1;
   const summary = {
     bot: name,
     seeds: runs.length,
@@ -97,7 +124,14 @@ function summarize(name: string, runs: Run[]): Record<string, unknown> {
     bestStreakMedian: median(runs.map((r) => r.bestStreak)),
     accuracyMedian: +median(runs.map((r) => r.accuracy)).toFixed(3),
     escapedMedianInWins: median(wins.map((r) => r.escaped)),
-    lossPhases: byPhase,
+    lossStages: byPhase,
+    // Median time of each speed-up, over the runs that reached it.
+    speedUpMedians: [0, 1, 2].map(
+      (i) => +median(runs.filter((r) => r.speedUps[i] !== undefined).map((r) => r.speedUps[i] ?? 0)).toFixed(1),
+    ),
+    maxSpawnGap: +Math.max(...runs.map((r) => r.maxGap)).toFixed(3),
+    emptyNetZoneSecondsMedian: +median(runs.map((r) => r.emptyZone)).toFixed(2),
+    maxSweepStep: +Math.max(...runs.map((r) => r.maxStep)).toFixed(3),
     // Median lb caught at each time mark, over all runs (wins hold at 200).
     paceCurve: Object.fromEntries(MARKS.map((t, i) => [t, median(runs.map((r) => r.curve[i] ?? 0))])),
     paceCurveWinners: Object.fromEntries(MARKS.map((t, i) => [t, median(wins.map((r) => r.curve[i] ?? 0))])),

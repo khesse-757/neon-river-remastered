@@ -1,8 +1,7 @@
 import type { LossCause } from '../sim/sim';
 
 export type ButtonName = 'start' | 'resume' | 'retry' | 'settings' | 'mute';
-export type ChannelName = 'music' | 'ambience' | 'notes' | 'sfx';
-export type ControlName = ButtonName | `vol-${ChannelName}` | `tog-${ChannelName}`;
+export type ControlName = ButtonName;
 
 export interface RunSummary {
   readonly cause: LossCause | null;
@@ -18,10 +17,7 @@ export interface TexelRect {
   readonly h: number;
 }
 
-export interface OverlayHandlers extends Record<ButtonName, () => void> {
-  volume: (channel: ChannelName, value: number) => void;
-  toggle: (channel: ChannelName, on: boolean) => void;
-}
+export type OverlayHandlers = Record<ButtonName, () => void>;
 
 const el = <T extends HTMLElement>(selector: string): T => {
   const node = document.querySelector<T>(selector);
@@ -30,7 +26,6 @@ const el = <T extends HTMLElement>(selector: string): T => {
 };
 
 const MIN_TOUCH = 44;
-const CHANNELS: readonly ChannelName[] = ['music', 'ambience', 'notes', 'sfx'];
 
 /**
  * The accessible layer over the canvas. All visible UI is drawn in the game's pixel grid; these
@@ -52,16 +47,6 @@ export class Overlay {
       button.hidden = true;
       this.controls.set(name, button);
     }
-    for (const channel of CHANNELS) {
-      const range = el<HTMLInputElement>(`#vol-${channel}`);
-      range.addEventListener('input', () => handlers.volume(channel, Number(range.value) / 100));
-      range.hidden = true;
-      this.controls.set(`vol-${channel}`, range);
-      const box = el<HTMLInputElement>(`#tog-${channel}`);
-      box.addEventListener('change', () => handlers.toggle(channel, box.checked));
-      box.hidden = true;
-      this.controls.set(`tog-${channel}`, box);
-    }
   }
 
   /** CSS pixels per target texel. */
@@ -76,11 +61,6 @@ export class Overlay {
     button?.setAttribute('aria-label', muted ? 'Sound off. Turn sound on' : 'Sound on. Turn sound off');
   }
 
-  setChannel(channel: ChannelName, volume: number, on: boolean): void {
-    (this.controls.get(`vol-${channel}`) as HTMLInputElement).value = String(Math.round(volume * 100));
-    (this.controls.get(`tog-${channel}`) as HTMLInputElement).checked = on;
-  }
-
   /** Put a control over its drawn art (target texels), padded out to a 44 px touch target. */
   place(name: ControlName, rect: TexelRect | null): void {
     const control = this.controls.get(name);
@@ -89,13 +69,11 @@ export class Overlay {
       if (!control.hidden) control.hidden = true;
       return;
     }
-    // Pad in whole texels so the hit area and focus ring stay on the pixel grid. A slider keeps
-    // its exact width so the thumb tracks the drawn knob.
+    // Pad in whole texels so the hit area and focus ring stay on the pixel grid.
     const t = this.texel;
-    const padX = name.startsWith('vol-') ? 0 : Math.max(0, Math.ceil((MIN_TOUCH - rect.w * t) / 2 / t));
+    const padX = Math.max(0, Math.ceil((MIN_TOUCH - rect.w * t) / 2 / t));
     const padY = Math.max(0, Math.ceil((MIN_TOUCH - rect.h * t) / 2 / t));
-    // A toggle grows to the left only, so it never overlaps the slider beside it.
-    const x = Math.max(0, rect.x - (name.startsWith('tog-') ? padX * 2 : padX)) * t;
+    const x = Math.max(0, rect.x - padX) * t;
     const y = Math.max(0, rect.y - padY) * t;
     const w = (rect.w + padX * 2) * t;
     const h = (rect.h + padY * 2) * t;

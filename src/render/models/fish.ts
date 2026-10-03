@@ -20,7 +20,10 @@ interface Species {
   /** 0..1 self-light at that point (eel stripes). */
   readonly emit: (t: number, angle: number) => number;
   readonly fins: (add: (points: [number, number, number][], t: number[], c: THREE.Color, e?: number) => void) => void;
-  /** Spine wave: number of waves along the body, amplitude as a fraction of length, how much the head moves. */
+  /**
+   * Spine wave: number of waves along the body, amplitude as a fraction of length, how much the head moves.
+   * Kept small: the head holds its lane, so a chain of fish reads as a curve; only the tail works.
+   */
   readonly wave: { k: number; amp: number; head: number };
   readonly glow: THREE.Color;
 }
@@ -96,7 +99,7 @@ const BLUEGILL: Species = {
       color('#235a68'),
     );
   },
-  wave: { k: 5.5, amp: 0.1, head: 0.12 },
+  wave: { k: 5.5, amp: 0.055, head: 0.04 },
   glow: color('#000000'),
 };
 
@@ -194,7 +197,7 @@ const KOI: Species = {
       color('#e77c1c'),
     );
   },
-  wave: { k: 6.5, amp: 0.12, head: 0.1 },
+  wave: { k: 6.5, amp: 0.065, head: 0.04 },
   glow: color('#ffb347').multiplyScalar(1.5),
 };
 
@@ -224,7 +227,7 @@ const EEL: Species = {
       0.4,
     );
   },
-  wave: { k: 8.5, amp: 0.06, head: 0.4 },
+  wave: { k: 8.5, amp: 0.045, head: 0.15 },
   glow: color('#39e6ee').multiplyScalar(0.87),
 };
 
