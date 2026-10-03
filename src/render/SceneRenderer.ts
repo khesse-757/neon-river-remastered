@@ -536,7 +536,7 @@ export class SceneRenderer {
     this.hoop.set(view.net.x, -this.net.radius * 0.12, -view.net.z);
     this.net.update(this.hoop, this.grip, view.net.velocity, view.net.lift, view.net.bulge, view.dt, view.net.charge);
     this.basket.update(view.basketFill, view.dt, view.time, view.basketFry, view.basketGlow);
-    this.winLight.intensity = 0.035 * view.basketGlow;
+    this.winLight.intensity = 0.014 * view.basketGlow;
     this.fish.time.value = view.time;
     this.airFish.time.value = view.time;
 

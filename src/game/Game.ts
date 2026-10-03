@@ -301,7 +301,8 @@ export class Game {
       // so the first thing the player hears is the real instrument, in time.
       const run = this.runCount;
       void this.audio.ready().then(() => {
-        if (this.runCount === run && this.mode === 'playing') this.audio.startSting();
+        // Not if the night already ended while the samples were loading.
+        if (this.runCount === run && this.mode === 'playing' && this.sim.state.status === 'playing') this.audio.startSting();
       });
     } else if (this.mode === 'paused') this.setMode('playing');
   }
