@@ -100,12 +100,9 @@ export function planLane(
       // No legal cell in reach. If this is the very first event the net is inside an eel's lane
       // right now: run for the nearer edge of it.
       if (!started && e.kind === 'eel') {
+        // Back away on the side the net is already on; crossing the eel's lane is how you get shocked.
         const edge = reach + options.eelMargin + 0.02;
-        const left = e.lane - edge;
-        const right = e.lane + edge;
-        if (left < 0) return right;
-        if (right > 1) return left;
-        return Math.abs(netLane - left) < Math.abs(netLane - right) ? left : right;
+        return netLane >= e.lane ? Math.min(1, e.lane + edge) : Math.max(0, e.lane - edge);
       }
       break;
     }

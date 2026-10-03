@@ -13,7 +13,7 @@ export interface HumanOptions {
   readonly lookahead: number;
 }
 
-export const SOLID_PLAYER: HumanOptions = { reaction: 0.22, aimNoise: 0.03, lookahead: 3 };
+export const SOLID_PLAYER: HumanOptions = { reaction: 0.22, aimNoise: 0.03, lookahead: 4 };
 
 /**
  * Human-like player: sees the river 220 ms late, plans only a few fish ahead, aims with noise,
@@ -45,7 +45,12 @@ export class HumanBot {
       this.wobble = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * this.rng.next()) * this.options.aimNoise;
       this.wobbleUntil = state.time + 0.2 + this.rng.next() * 0.2;
     }
-    const lane = planLane(state.net.lane, fish, config, { lookahead: this.options.lookahead, eelMargin: 0.07, catchShare: 0.75 });
+    const lane = planLane(
+      state.net.lane,
+      fish,
+      config, // A person aims at the middle of the fish, not at the edge of what would still count.
+      { lookahead: this.options.lookahead, eelMargin: 0.09, catchShare: 0.45 },
+    );
     return toIntent(lane + this.wobble);
   }
 }

@@ -167,6 +167,12 @@ export class Game {
     this.startRun();
   }
 
+  /** Dev tune panel: change the pace multipliers of the running night. */
+  setTune(tune: SimConfig['tune']): void {
+    this.config = { ...this.config, tune };
+    this.sim.config = this.config;
+  }
+
   togglePause(): void {
     if (this.mode === 'playing') this.setMode('paused');
     else if (this.mode === 'paused') this.setMode('playing');
@@ -228,11 +234,13 @@ export class Game {
     else if (this.mode === 'paused') this.setMode('playing');
   }
 
-  private startRun(startPhase = 0, skipRest = false): void {
+  private startRun(startPhase = 0): void {
     // Wall-clock time only picks the seed; the run itself stays deterministic for that seed.
     if (!this.seedPinned) this.seed = (Date.now() + this.runCount * 7919) >>> 0;
     this.runCount += 1;
-    this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startPhase, skipRest });
+    this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startPhase });
+    // Starting mid-script (test hooks): put the clock, and so the ramp, where that phase would begin.
+    this.sim.state.time = this.config.phases.slice(0, startPhase).reduce((t, p) => t + p.length + this.config.restSeconds, 0);
     this.fx = createRng(this.seed ^ 0x9e3779b9);
     this.accumulator = 0;
     this.hitstop = 0;
@@ -317,11 +325,15 @@ export class Game {
     switch (event.type) {
       case 'restStart':
         this.bannerText = event.next.name.toUpperCase();
-        this.banner = this.config.restSeconds;
+        this.banner = this.config.bannerSeconds;
         this.audio.banner();
         break;
       case 'phaseStart':
-        this.banner = Math.min(this.banner, 0.4);
+        // The opening phase has no rest before it, so its banner starts here.
+        if (this.banner <= 0 && this.sim.state.time < 0.5) {
+          this.bannerText = event.phase.name.toUpperCase();
+          this.banner = this.config.bannerSeconds;
+        }
         break;
       case 'telegraph':
         this.telegraph = { lane: event.lane, age: 0 };
@@ -647,7 +659,7 @@ export class Game {
 
     // The emitter's lane is marked twice: at the far bend, and again a little downstream where the
     // river is wide enough for the lane to be read. An incoming eel turns both cold blue and bigger.
-    if (this.mode === 'playing' && !state.resting) {
+    if (this.mode === 'playing') {
       const pulse = 0.5 + 0.5 * Math.sin(this.time * 9);
       const far = river.pointAt(0.05, state.emitter.lane);
       const read = river.pointAt(river.progressToS(EMITTER_READ), state.emitter.lane);
@@ -851,9 +863,9 @@ export class Game {
 
   private installTestHooks(): void {
     const phaseIds = PHASES.map((p) => p.id);
-    const settle = (seconds: number, opts: { startPhase?: number; skipRest?: boolean; idle?: boolean } = {}): void => {
+    const settle = (seconds: number, opts: { startPhase?: number; idle?: boolean } = {}): void => {
       this.frozen = false;
-      this.startRun(opts.startPhase ?? 0, opts.skipRest ?? false);
+      this.startRun(opts.startPhase ?? 0);
       this.autoplay = !opts.idle;
       const warm = 1.5;
       for (let t = 0; t < seconds - warm && this.sim.state.status === 'playing'; t += STEP) {
@@ -881,8 +893,8 @@ export class Game {
           this.frozen = false;
           this.setMode('title');
         } else if (name === 'active-play') settle(9);
-        else if (phase && phaseIds.includes(phase[1] ?? '')) settle(5, { startPhase: phaseIds.indexOf(phase[1] ?? ''), skipRest: true });
-        else if (name === 'rest') settle(12.7);
+        else if (phase && phaseIds.includes(phase[1] ?? '')) settle(5, { startPhase: phaseIds.indexOf(phase[1] ?? '') });
+        else if (name === 'rest') settle(PHASES[0]!.length + 0.4);
         else if (name === 'pause') {
           settle(9);
           this.setMode('paused');
@@ -895,7 +907,7 @@ export class Game {
           if (this.scoop === 0) throw new Error('koi-scoop not reached');
         } else if (name === 'eel-near') {
           // An eel passing just beside the net.
-          settle(5, { startPhase: 1, skipRest: true });
+          settle(5, { startPhase: 1 });
           const lane = this.sim.state.net.lane;
           this.sim.debugSpawn('eel', lane > 0.5 ? lane - 0.3 : lane + 0.3, 0.86);
           for (let i = 0; i < 14; i++) this.frame(STEP);

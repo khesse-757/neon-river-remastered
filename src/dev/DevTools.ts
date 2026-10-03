@@ -7,7 +7,7 @@ import type { RiverData } from '../sim/river';
  * Dev-only: lil-gui tuning plus a path editor drawn over the game. Drag bank points to refit the
  * river to the painting, then "export" to copy JSON for src/data/river.ts.
  */
-export function installDevTools(game: Game): void {
+export function installDevTools(game: Game, openTune = false): void {
   const data = structuredClone(RIVER) as { -readonly [K in keyof RiverData]: RiverData[K] };
   const banks = data.banks.map((b) => [...b]) as [number, number, number, number][];
   const camera = { ...data.camera };
@@ -120,6 +120,41 @@ export function installDevTools(game: Game): void {
 
   const gui = new GUI({ title: 'Neon River dev' });
   gui.close();
+
+  // ?tune: live pace multipliers, sized for a thumb, with a copy button to paste the values back.
+  const tune = { ...game.config.tune, values: '' };
+  const tuneFolder = gui.addFolder('tune (pace)');
+  const show = (): void => {
+    const { speed, density, sweep, eel } = tune;
+    tune.values = JSON.stringify({ speed, density, sweep, eel });
+    game.setTune({ speed, density, sweep, eel });
+    valuesField.updateDisplay();
+  };
+  tuneFolder.add(tune, 'speed', 0.5, 2, 0.05).name('speed x').onChange(show);
+  tuneFolder.add(tune, 'density', 0.5, 2, 0.05).name('density x').onChange(show);
+  tuneFolder.add(tune, 'sweep', 0.25, 2, 0.05).name('sweep x').onChange(show);
+  tuneFolder.add(tune, 'eel', 0, 2, 0.05).name('eel chance x').onChange(show);
+  const valuesField = tuneFolder.add(tune, 'values').name('values');
+  tuneFolder
+    .add(
+      {
+        copy: () => {
+          show();
+          // Clipboard needs a secure context; on a LAN dev URL the field above can be selected instead.
+          void navigator.clipboard?.writeText(tune.values).catch(() => undefined);
+        },
+      },
+      'copy',
+    )
+    .name('copy values');
+  show();
+  if (openTune) {
+    gui.open();
+    tuneFolder.open();
+    gui.domElement.style.setProperty('--width', '300px');
+    gui.domElement.style.setProperty('--widget-height', '34px');
+    gui.domElement.style.setProperty('--font-size', '14px');
+  }
   gui
     .add(state, 'editor')
     .name('path editor')

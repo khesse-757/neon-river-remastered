@@ -138,32 +138,64 @@ describe('net', () => {
 });
 
 describe('phases and emitter', () => {
-  it('opens with a rest, then runs each phase for its length with rests between', () => {
-    const { events } = run(7, 36, tracker);
-    const marks = events.filter((e) => e.type === 'phaseStart' || e.type === 'restStart');
-    expect(marks.slice(0, 5).map((e) => e.type)).toEqual(['restStart', 'phaseStart', 'restStart', 'phaseStart', 'restStart']);
+  it('opens straight into play with fish already in the river, then alternates phases and short rests', () => {
     const sim = new Sim({ seed: 7, river });
-    const times: number[] = [];
-    for (let i = 0; i < 40 / DT; i++) {
+    expect(sim.state.resting).toBe(false);
+    expect(sim.state.fish.length).toBe(DEFAULT_CONFIG.prefill.length);
+    const marks: { type: string; t: number }[] = [];
+    for (const e of sim.drainEvents()) marks.push({ type: e.type, t: 0 });
+    let firstArrival = Infinity;
+    for (let i = 0; i < 40 / DT && sim.state.status === 'playing'; i++) {
       sim.step(DT, tracker(sim));
-      for (const e of sim.drainEvents()) if (e.type === 'phaseStart') times.push(sim.state.time);
-      if (sim.state.status !== 'playing') break;
+      for (const e of sim.drainEvents()) {
+        if (e.type === 'phaseStart' || e.type === 'restStart') marks.push({ type: e.type, t: sim.state.time });
+        if ((e.type === 'catch' || e.type === 'miss') && firstArrival === Infinity) firstArrival = sim.state.time;
+      }
     }
-    expect(times[0]).toBeCloseTo(2, 1);
-    expect(times[1]).toBeCloseTo(14, 1);
-    expect(times[2]).toBeCloseTo(26, 1);
+    // The first fish reaches the net within about two seconds.
+    expect(firstArrival).toBeLessThan(2.1);
+    expect(marks.slice(0, 4).map((m) => m.type)).toEqual(['phaseStart', 'restStart', 'phaseStart', 'restStart']);
+    const [p0, p1] = DEFAULT_CONFIG.phases;
+    expect(marks[1]?.t).toBeCloseTo(p0!.length, 1);
+    expect(marks[2]?.t).toBeCloseTo(p0!.length + DEFAULT_CONFIG.restSeconds, 1);
+    expect(marks[3]?.t).toBeCloseTo(p0!.length + DEFAULT_CONFIG.restSeconds + p1!.length, 1);
+    expect(DEFAULT_CONFIG.restSeconds).toBeLessThanOrEqual(0.75);
   });
 
-  it('never spawns during a rest and never spawns eels in Still Water', () => {
+  it('tightens travel, period and sweep continuously along the ramp', () => {
+    const sim = new Sim({ seed: 3, river });
+    const start = sim.pace();
+    let last = start;
+    for (let i = 0; i < 9 / DT; i++) {
+      sim.step(DT, tracker(sim));
+      sim.drainEvents();
+      const now = sim.pace();
+      expect(now.travel).toBeLessThanOrEqual(last.travel + 1e-9);
+      expect(now.period).toBeLessThanOrEqual(last.period + 1e-9);
+      last = now;
+    }
+    expect(last.travel).toBeLessThan(start.travel);
+    expect(sim.state.ramp).toBeGreaterThan(0);
+    // The ramp also follows weight: a nearly full basket is at full pace whatever the clock says.
+    const late = new Sim({ seed: 3, river, empty: true });
+    late.state.caught = DEFAULT_CONFIG.winWeight - 1;
+    late.step(DT, { kind: 'none' });
+    expect(late.state.ramp).toBeGreaterThan(0.99);
+    expect(late.pace().travel).toBeCloseTo(DEFAULT_CONFIG.ramp.travel[1] * late.state.phase.travelMul, 1);
+  });
+
+  it('never spawns during a rest, and never spawns eels in a phase without them', () => {
+    const calm: SimConfig = { ...DEFAULT_CONFIG, phases: DEFAULT_CONFIG.phases.map((p, i) => (i === 0 ? { ...p, eelChance: 0 } : p)) };
     for (const seed of SEEDS.slice(0, 40)) {
-      const sim = new Sim({ seed, river });
-      for (let i = 0; i < 13.9 / DT; i++) {
+      const sim = new Sim({ seed, river, config: calm });
+      for (let i = 0; i < 16 / DT && sim.state.status === 'playing'; i++) {
         const resting = sim.state.resting;
+        const phase = sim.state.phase.id;
         sim.step(DT, tracker(sim));
         for (const e of sim.drainEvents()) {
           if (e.type !== 'spawn') continue;
           expect(resting && sim.state.resting).toBe(false);
-          if (sim.state.phase.id === 'still-water') expect(e.fish.kind).not.toBe('eel');
+          if (phase === 'still-water' && sim.state.phase.id === 'still-water') expect(e.fish.kind).not.toBe('eel');
         }
       }
     }
@@ -218,7 +250,7 @@ describe('phases and emitter', () => {
 });
 
 describe('eel warnings and spacing at the net', () => {
-  it('gives every eel its full telegraph lead, even as the first spawn of a phase', () => {
+  it('warns of every eel a full lead (or a full spawn period) ahead, even as the first spawn of a phase', () => {
     for (const seed of SEEDS.slice(0, 60)) {
       const sim = new Sim({ seed, river });
       let warnedAt: number | null = null;
@@ -228,7 +260,9 @@ describe('eel warnings and spacing at the net', () => {
           if (e.type === 'telegraph') warnedAt = sim.state.time;
           if (e.type === 'spawn' && e.fish.kind === 'eel') {
             expect(warnedAt).not.toBeNull();
-            expect(sim.state.time - (warnedAt ?? 0)).toBeGreaterThanOrEqual(DEFAULT_CONFIG.telegraphLead - 2 * DT);
+            // The warning comes as early as the spawn rhythm allows: the full lead, or one spawn period.
+            const lead = Math.min(DEFAULT_CONFIG.telegraphLead, sim.pace().period);
+            expect(sim.state.time - (warnedAt ?? 0)).toBeGreaterThanOrEqual(lead - 2 * DT - 1e-6);
             warnedAt = null;
           }
         }
@@ -286,7 +320,8 @@ describe('fairness guards', () => {
 });
 
 describe('catching and scoring', () => {
-  const quiet: SimConfig = { ...DEFAULT_CONFIG, restSeconds: 1000 };
+  // No spawns at all: a script whose only phase never reaches its first spawn.
+  const quiet: SimConfig = { ...DEFAULT_CONFIG, prefill: [], ramp: { ...DEFAULT_CONFIG.ramp, period: [1e6, 1e6] }, telegraphLead: 1e6 };
 
   it('catches with a circle test and adds weight and streak', () => {
     const sim = new Sim({ seed: 1, river, config: quiet });
@@ -356,7 +391,10 @@ describe('catching and scoring', () => {
   it('loses at 20 lb escaped and wins at 200 lb caught', () => {
     // A net parked at the bank with no eels in the script: only the escape budget can end it,
     // and it ends exactly when the 20th pound slips past.
-    const noEels: SimConfig = { ...DEFAULT_CONFIG, phases: DEFAULT_CONFIG.phases.map((p) => ({ ...p, eelChance: 0, sweep: 0 })) };
+    const noEels: SimConfig = {
+      ...DEFAULT_CONFIG,
+      phases: DEFAULT_CONFIG.phases.map((p) => ({ ...p, eelChance: 0, sweepMul: 0, pinned: undefined })),
+    };
     for (const seed of SEEDS.slice(0, 20)) {
       const sim = new Sim({ seed, river, config: noEels });
       let before = 0;
