@@ -19,3 +19,5 @@ artifacts/**/*.webm
 .claude/worktrees/
 # v1 source is a local, read-only reference (it lives in its own repo)
 reference/
+*.log
+*.tsbuildinfo
