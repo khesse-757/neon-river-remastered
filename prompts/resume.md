@@ -1,0 +1,1 @@
+We're resuming the Neon River remaster. Use threejs-game-director and neon-river-art-direction. Re-read CLAUDE.md, docs/design/REMASTER_BRIEF.md and artifacts/game-progress.md, check `git log --oneline -20` and `git status`, then tell me in five lines: which gate we're in, what's done, what's in progress, any defects, and the next action. Then continue the current gate.

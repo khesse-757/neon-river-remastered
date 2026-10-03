@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.vite/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+artifacts/pass-*/
+artifacts/**/*.png
+artifacts/**/*.webm
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+# Claude Code: personal approvals and worktree checkouts stay local
+.claude/settings.local.json
+.claude/worktrees/
+# v1 source is a local, read-only reference (it lives in its own repo)
+reference/
