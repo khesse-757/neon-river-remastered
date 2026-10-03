@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 — 2026-10-03
+
+### Fixed
+
+- The skyline no longer shifts sideways when the net moves. The far layer's parallax followed the net; now only the slow
+  camera drift moves it.
+
 ## 2.0.0 — 2026-10-03
 
 The remaster. A rebuild of [Neon River v1](https://github.com/khesse-757/neon-river) on three.js.
