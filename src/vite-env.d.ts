@@ -52,6 +52,10 @@ interface ThreeGameTestHooks {
   audioLevel(): number;
   /** Music and ambience beds off or on, so a test can listen for one sound at a time. */
   setAudioBeds(on: boolean): void;
+  /** Only this named sound may play (start, catch, miss, eel, win, loss, speed-up, warn, near, fry, ui); null restores all. */
+  soloAudio(name: string | null): void;
+  /** Set the weight caught so far (to reach a real win with one more fish). */
+  setWeight(pounds: number): void;
   /** Expand or collapse the Advanced audio section of the settings panel. */
   openAdvancedAudio(open: boolean): void;
 }

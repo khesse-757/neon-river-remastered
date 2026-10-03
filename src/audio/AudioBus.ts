@@ -118,7 +118,10 @@ export class AudioBus {
   private warning: GainNode | null = null;
   private wantLoops = false;
   private bedsOn = true;
+  /** Tests: when set, only this named sound is allowed to play. */
+  private solo: string | null = null;
   private readonly loading: Promise<void>;
+  private readonly files = new Map<string, Promise<void>>();
   private pending: [string, ArrayBuffer][] = [];
   private musicStart = 0;
   private audition = false;
@@ -149,6 +152,12 @@ export class AudioBus {
     return this.buffers.has(id);
   }
 
+  /** Resolves when one sample has loaded (or failed), or after `maxWait` ms, whichever is first. */
+  async sample(id: string, maxWait: number): Promise<boolean> {
+    await Promise.race([this.files.get(id) ?? this.loading, new Promise<void>((resolve) => setTimeout(resolve, maxWait))]);
+    return this.buffers.has(id);
+  }
+
   /** Change settings; they apply to whatever is sounding now and are saved. */
   update(patch: Partial<AudioSettings>): void {
     Object.assign(this.settings, patch);
@@ -171,7 +180,7 @@ export class AudioBus {
 
   /** An EQ preset sets the three tone sliders; Night also turns the level down and compresses harder. */
   setEqPreset(preset: EqPreset): void {
-    this.update({ eq: preset, ...EQ_PRESETS[preset] });
+    this.update({ eq: preset, night: preset === 'night', ...EQ_PRESETS[preset] });
   }
 
   resetSettings(): void {
@@ -345,6 +354,18 @@ export class AudioBus {
   }
 
   /**
+   * Tests listen for one sound at a time: with a name set, every other game sound stays silent, so
+   * a level at the output can only be that sound. Null restores normal play.
+   */
+  setSolo(name: string | null): void {
+    this.solo = name;
+  }
+
+  private allowed(name: string): boolean {
+    return this.solo === null || this.solo === name;
+  }
+
+  /**
    * Turn the music and ambience beds off or back on (the audition page's "over the music" switch,
    * and tests that listen for one sound at a time).
    */
@@ -366,7 +387,10 @@ export class AudioBus {
     this.wantLoops = false;
     const now = this.ctx?.currentTime ?? 0;
     for (const { source, fade } of this.loops.values()) {
+      // Hold wherever the fade-in has got to, then fade from there: no cut if stopped mid-ramp.
+      const held = fade.gain.value;
       fade.gain.cancelScheduledValues(now);
+      fade.gain.setValueAtTime(held, now);
       fade.gain.setTargetAtTime(0, now, 0.04);
       source.stop(now + 0.3);
     }
@@ -390,7 +414,7 @@ export class AudioBus {
   catch(streak: number, koi: boolean): void {
     const { ctx } = this;
     // Two fish scooped in the same frame sound once.
-    if (!ctx || !this.fresh('catch')) return;
+    if (!ctx || !this.allowed('catch') || !this.fresh('catch')) return;
     this.splashToggle = !this.splashToggle;
     this.play(koi ? 'splash2' : this.splashToggle ? 'splash1' : 'splash2', 'sfx', koi ? 0.7 : 0.48, 0.94 + this.rng.next() * 0.12);
     this.play('net', 'sfx', 0.18);
@@ -407,19 +431,21 @@ export class AudioBus {
 
   /** Miss: with Fish Notes on, the motif's tail falls to the low tonic; otherwise a soft low knock. */
   miss(): void {
-    if (!this.fresh('miss', 0.12)) return;
+    if (!this.allowed('miss') || !this.fresh('miss', 0.12)) return;
     if (this.settings.enabled.notes) this.playCue(missFall(this.theme), 0.45, 0.8, { route: 'notes' });
     else this.tone(degreeToHz(-7), 0.16, 0.1, 'sine', 'sfx', 0, degreeToHz(-10));
   }
 
   /** Run start: the leitmotif, stated once. */
   startSting(): void {
+    if (!this.allowed('start')) return;
     this.duckMusic(2.4, 0.5);
     this.playCue(this.theme.startSting, 1, 0.85, { pad: true });
   }
 
   /** A speed-up: three notes of the motif, a step higher each time, over a rising rush of water. */
   speedUpSting(index = 1): void {
+    if (!this.allowed('speed-up')) return;
     this.duckMusic(1.2, 0.6);
     const lift = Math.max(0, index - 1);
     this.playCue(
@@ -432,12 +458,14 @@ export class AudioBus {
 
   /** Win: the motif answered an octave up, ending on a held chord. */
   winFanfare(): void {
+    if (!this.allowed('win')) return;
     this.duckMusic(7, 0.3);
     this.playCue(this.theme.winFanfare, 1, 1, { pad: true, hold: true });
   }
 
   /** Loss: the motif sinking to the low tonic. */
   lossPhrase(): void {
+    if (!this.allowed('loss')) return;
     this.playCue(this.theme.lossPhrase, 1.25, 0.8, { pad: true });
   }
 
@@ -505,7 +533,7 @@ export class AudioBus {
 
   /** A tiny tick for buttons and switches. */
   uiTick(): void {
-    if (this.fresh('ui')) this.tone(1320, 0.05, 0.1, 'sine', 'ui');
+    if (this.allowed('ui') && this.fresh('ui')) this.tone(1320, 0.05, 0.1, 'sine', 'ui');
   }
 
   /** One sound, so a fader can be set by ear. */
@@ -516,9 +544,14 @@ export class AudioBus {
     else if (key === 'ui') this.tone(1320, 0.05, 0.1, 'sine', 'ui');
   }
 
-  /** Eel warning: a soft crackle. It can be cancelled if the eel does not come. */
+  /** Eel warning: a soft crackle for the length of the warning. It is cut short if the eel does not come. */
   warn(): void {
-    this.warning = this.crackle(0.5, 0.15);
+    if (this.allowed('warn')) this.warning = this.crackle(0.6, 0.15);
+  }
+
+  /** An eel slipping just past the net. */
+  nearMiss(): void {
+    if (this.allowed('near')) this.crackle(0.25, 0.18);
   }
 
   cancelWarning(): void {
@@ -558,7 +591,7 @@ export class AudioBus {
   zap(): void {
     const { ctx } = this;
     const bus = this.buses.get('sfx');
-    if (!ctx || !bus) return;
+    if (!ctx || !bus || !this.allowed('eel')) return;
     this.duckMusic(3.5, 0.12);
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
@@ -575,11 +608,13 @@ export class AudioBus {
     osc.connect(tone).connect(gain).connect(bus);
     osc.start(now);
     osc.stop(now + 1.2);
-    this.crackle(0.9, 0.4);
+    // The buzz is the shock; the crackle rides on it (and stays out of a solo'd measurement).
+    if (this.solo === null) this.crackle(0.9, 0.4);
   }
 
   /** The basket frying: a longer sizzle under the crackle. */
   fry(): void {
+    if (!this.allowed('fry')) return;
     this.noise(1.2, 0.16, 'highpass', 3800, 3800, 0.02);
     this.crackle(1.0, 0.3);
   }
@@ -624,8 +659,10 @@ export class AudioBus {
     }
     switch (route) {
       case 'music':
-      case 'cue':
         return s.enabled.music ? fader('music') : 0;
+      case 'cue':
+        // Stingers follow the music fader; with Music off they are game cues and follow Sounds.
+        return s.enabled.music ? fader('music') : s.enabled.sfx ? fader('sfx') * 0.8 : 0;
       case 'notes':
         return s.enabled.notes ? fader('notes') : 0;
       case 'preview':
@@ -657,10 +694,11 @@ export class AudioBus {
     set(eq.mid.gain, s.mid);
     set(eq.treble.gain, s.treble);
     // Night: quieter, with the loud moments pulled down toward the quiet ones.
-    const night = s.eq === 'night';
+    const night = s.night;
     set(comp.threshold, night ? -30 : -16);
     set(comp.ratio, night ? 8 : 3);
-    set(out.gain, night ? 0.6 : 1);
+    // The compressor's make-up gain rises as its threshold drops, so the trim is larger than it looks.
+    set(out.gain, night ? 0.4 : 1);
     set(reverbReturn.gain, s.reverb);
     mono.channelCount = s.mono ? 1 : 2;
     mono.channelCountMode = s.mono ? 'explicit' : 'max';
@@ -710,18 +748,22 @@ export class AudioBus {
     const Offline = window.OfflineAudioContext;
     const decoder = Offline ? new Offline(2, 1, 44100) : null;
     await Promise.all(
-      Object.entries(FILES).map(async ([id, path]) => {
-        try {
-          const response = await fetch(`${import.meta.env.BASE_URL}${path}`);
-          if (!response.ok) throw new Error(`${response.status}`);
-          const data = await response.arrayBuffer();
-          const context = decoder ?? this.ctx;
-          if (context) await this.decode(id, data, context);
-          else this.pending.push([id, data]);
-        } catch (error) {
-          this.errors.push(`${id}: ${String(error)}`);
-          console.warn(`Audio "${id}" failed to load; continuing without it.`, error);
-        }
+      Object.entries(FILES).map(([id, path]) => {
+        const job = (async (): Promise<void> => {
+          try {
+            const response = await fetch(`${import.meta.env.BASE_URL}${path}`);
+            if (!response.ok) throw new Error(`${response.status}`);
+            const data = await response.arrayBuffer();
+            const context = decoder ?? this.ctx;
+            if (context) await this.decode(id, data, context);
+            else this.pending.push([id, data]);
+          } catch (error) {
+            this.errors.push(`${id}: ${String(error)}`);
+            console.warn(`Audio "${id}" failed to load; continuing without it.`, error);
+          }
+        })();
+        this.files.set(id, job);
+        return job;
       }),
     );
   }

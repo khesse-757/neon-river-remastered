@@ -213,3 +213,95 @@ Kyle played it: right look, too slow for too long, and the catch tune was "thin"
 Media: `docs/media/gate-1.5/` — `full-run-desktop.webm`, `full-run-mobile.webm`
 (a whole bot-played night to the win), `eel-basket-*.webm`, `win-*`,
 `win-results-*`, `eel-basket-*`, `eel-storm-*`, `title-settings-*`.
+
+## 2026-10-03 — Gate 1.5, round 3: the dance, and a quieter river
+
+Kyle's verdict on round 2: the look is close, but the fish pattern "feels
+disjointed and jagged, with too much down time", the catch melody clashes with
+the music, and the `?audition` page plays nothing at all on his Mac.
+
+### The audition page was silent because of a mute button
+
+- I could not hear it either way, so I measured it: a Playwright script taps
+  everything that reaches the output with an AnalyserNode and prints RMS.
+  Fresh profile: 0.33. Saved mute: 0.0000. Fish Notes switched off: only the
+  music bed (0.05–0.14), no motif.
+- Root cause: the audition page played the motifs through the same master mute
+  and the same Fish Notes switch as the game. Kyle had found the catch melody
+  grating, so he had very likely turned exactly those off, and then the page
+  built for choosing a melody could not play one. "Use this one" still
+  registered because it only writes a setting.
+- Fix: the page now plays at default levels whatever the saved mix says, has a
+  live output meter, and the same measurement is a permanent test: Playwright
+  clicks all 18 buttons with a fresh profile and with everything muted and
+  zeroed, and checks the output level for each; then does the same in the game
+  for the start sting, a catch, the eel shock and the win fanfare. "I can't
+  hear it" stops being a reason for audio to go unverified.
+
+### The fish pattern: measure "jagged" first
+
+The playtester agent put numbers on the complaint before I touched anything:
+
+|                                             | Before                                  | After                                                 |
+| ------------------------------------------- | --------------------------------------- | ----------------------------------------------------- |
+| Lane step between consecutive fish (median) | 0.26 widths                             | on the sine: ≤ 0.31, typically 0.1–0.2                |
+| Direction reversals per 10 spawns           | 6.4                                     | under 3 in Still Water (one per crossing)             |
+| Longest gap without a spawn                 | 2.1 s (ten times a night, at the rests) | the stage's own period: 0.9 → 0.5 s                   |
+| Seconds per night with nothing near the net | 9.3                                     | 0.55                                                  |
+| Eel warnings with no eel                    | ~4.7 per night                          | 0 (a warning is cancelled if a guard removes the eel) |
+
+- The old emitter was a linear ping-pong with random swing lengths, plus a
+  fairness guard that moved fish 0.4 widths sideways when an eel was nearby.
+  Two thirds of all spawns reversed direction. That is scatter, not a chain.
+- New director: one emitter moving in eased swings. In Still Water that is a
+  plain sine, bank to bank. Three speed-ups (40 / 90 / 140 lb, or the clock)
+  add speed, density, shorter swings and sudden reversals. The last stage,
+  Bank to Bank, pins a burst of fish at one bank and then jumps to the other.
+- No rests, no phases. A speed-up is an event, not a pause. One detail that
+  mattered: fish used to keep the speed they were born with, so a speed-up
+  made new fish catch up with old ones and bunch. Now the whole river has one
+  current and every fish speeds up together.
+
+### The same arithmetic, a third time
+
+Kyle asked for no spawn gap longer than ~0.5 s, koi at 8%, eels at 5%, and a
+2:00–2:30 win. Those cannot all hold: 8% koi and 5% eels is 1.27 lb per spawn,
+so a spawn every 0.5 s is 2.5 lb/s and the first speed-up arrives at 0:18, the
+win around 1:20. My first table did exactly that (median win 1:45). I kept the
+win time and the Still Water mix, and let the period be what the budget allows:
+0.9 s in Still Water, tightening to 0.5 s in Bank to Bank, where almost half
+the spawns are eels and weigh nothing. What was really "down time" before was
+the rests, and those are gone.
+
+A surprise while tuning: the human-like bot's win rate fell off a cliff
+between a 0.50 s and a 0.47 s period in the last stage (58% → 24%), almost all
+of it eel losses. Half a second is where a 220 ms reaction and a 0.6 s eel
+warning stop being enough.
+
+### Calming the audio
+
+- Fish Notes are off by default. A catch is a splash and a 120 ms sine chime
+  on the tonic or the fifth, which sits inside every chord of the bed.
+- The spawn tick is gone; the eel warning and near-miss crackle are softer.
+- Clicks: several voices started at full level (the pluck, the zap, the fry
+  noise, every plain tone) and cues were cut with a hard `stop()`. Every voice
+  now has an attack and a decay, cues fade, duplicates within 45 ms play once,
+  and at most 16 one-shot voices sound at a time.
+- Samples are fetched and decoded with an OfflineAudioContext while the title
+  screen loads, before any gesture, so the first sting is the real instrument.
+
+### One quad instead of forty
+
+The pause panel sat at exactly 100 draw calls because every label, box and
+slider part was its own quad and texture. Advanced audio needed about 25 more
+rows. The settings list is now drawn on a 2D canvas at one pixel per texel and
+shown as a single quad, over a real, natively scrolling DOM list of
+transparent form controls. Touch scrolling, keyboard focus and screen readers
+come for free, and the pause screen dropped to 72 draw calls.
+
+### Asked for, then removed
+
+Kyle asked for a neon surge at each speed-up and a pulse on the score tablet.
+After playing the build he asked for both to go: distracting.
+The speed-up is now its stinger, its sign and some quiet streaks of current.
+The cheapest playtest is still the owner playing it.

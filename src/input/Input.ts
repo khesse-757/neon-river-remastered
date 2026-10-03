@@ -61,6 +61,9 @@ export class Input {
         }
         return;
       }
+      // Buttons in the settings list keep Space and Enter for themselves.
+      if (e.target instanceof HTMLButtonElement && e.target.closest('#settings-scroll') && (e.code === 'Space' || e.code === 'Enter'))
+        return;
       if (LEFT_KEYS.has(e.code) || RIGHT_KEYS.has(e.code)) {
         this.held.add(e.code);
         this.device = 'keys';

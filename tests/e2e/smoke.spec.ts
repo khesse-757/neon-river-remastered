@@ -105,6 +105,32 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
     .evaluateAll((nodes) => nodes.map((n) => [n.id, n.getBoundingClientRect().width, n.getBoundingClientRect().height] as const));
   expect(sizes.length).toBeGreaterThanOrEqual(25);
   for (const [id, w, h] of sizes) expect(Math.min(w, h), id).toBeGreaterThanOrEqual(44);
+  if (mobile) {
+    // A swipe that starts on a fader scrolls the list and leaves the fader alone; a sideways drag moves it.
+    const scroller = page.locator('#settings-scroll');
+    const value = () => page.locator('#set-adv-ambience').inputValue();
+    await page.locator('#set-adv-ambience').scrollIntoViewIfNeeded();
+    const was = await value();
+    const top = await scroller.evaluate((node) => node.scrollTop);
+    const grip = (await page.locator('#set-adv-ambience-grip').boundingBox())!;
+    const gx = grip.x + grip.width * 0.2;
+    const gy = grip.y + grip.height / 2;
+    await touchDrag(page, [gx, gy], [gx + 6, gy - 160]);
+    await expect.poll(() => scroller.evaluate((node) => node.scrollTop)).toBeGreaterThan(top + 60);
+    expect(await value()).toBe(was);
+    await page.locator('#set-adv-ambience').scrollIntoViewIfNeeded();
+    const again = (await page.locator('#set-adv-ambience-grip').boundingBox())!;
+    const ay = again.y + again.height / 2;
+    await touchDrag(page, [again.x + again.width * 0.7, ay], [again.x + again.width * 0.15, ay + 3]);
+    await expect.poll(async () => Number(await value())).toBeLessThan(Number(was) - 20);
+  } else {
+    // Mouse: clicking the drawn knob position for 25 sets exactly 25.
+    await page.locator('#set-adv-ui').scrollIntoViewIfNeeded();
+    const grip = (await page.locator('#set-adv-ui-grip').boundingBox())!;
+    const texel = grip.width / 68;
+    await page.mouse.click(grip.x + (2 + 64 * 0.25) * texel, grip.y + grip.height / 2);
+    expect(await page.locator('#set-adv-ui').inputValue()).toBe('25');
+  }
   await page.locator('#set-eq').scrollIntoViewIfNeeded();
   await tap('#set-eq');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('neonriver2_audio_v2') ?? '{}') as Record<string, unknown>);

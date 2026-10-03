@@ -232,7 +232,15 @@ export class SettingsPanel {
     const simple: Row[] = [
       master('master'),
       fader('music', 'MUSIC', 'music', { name: 'Music', get: () => s.enabled.music, set: (on) => audio.setEnabled('music', on) }),
-      fader('sounds', 'SOUNDS', 'sfx', { name: 'Sounds', get: () => s.enabled.sfx, set: (on) => audio.setEnabled('sfx', on) }),
+      {
+        // One fader for everything that is not music or Fish Notes: it moves splashes, ambience
+        // and UI together. Advanced audio sets them apart.
+        ...fader('sounds', 'SOUNDS', 'sfx', { name: 'Sounds', get: () => s.enabled.sfx, set: (on) => audio.setEnabled('sfx', on) }),
+        set: (v: number) => {
+          for (const key of ['sfx', 'ambience', 'ui'] as const) audio.setVolume(key, v / 100);
+          audio.preview('sfx');
+        },
+      },
       {
         kind: 'toggle',
         id: 'notes',
@@ -251,7 +259,8 @@ export class SettingsPanel {
       },
     ];
     if (!this.advanced) return simple;
-    const presets = [...EQ_PRESET_IDS.map((p) => p.toUpperCase()), 'CUSTOM'];
+    // Moving a tone slider leaves the preset; Night keeps its quieter, compressed output while edited.
+    const presets = [...EQ_PRESET_IDS.map((p) => p.toUpperCase()), 'CUSTOM', 'NIGHT, EDITED'];
     return [
       ...simple,
       { kind: 'heading', text: 'VOLUME' },
@@ -292,8 +301,8 @@ export class SettingsPanel {
         id: 'eq',
         label: 'EQ',
         options: presets,
-        get: () => (s.eq === 'custom' ? presets.length - 1 : EQ_PRESET_IDS.indexOf(s.eq)),
-        // "Custom" is where the sliders put you; stepping past it returns to the first preset.
+        get: () => (s.eq === 'custom' ? EQ_PRESET_IDS.length + (s.night ? 1 : 0) : EQ_PRESET_IDS.indexOf(s.eq)),
+        // The two edited states are where the sliders put you; stepping on from them returns to a preset.
         set: (i) => audio.setEqPreset(EQ_PRESET_IDS[i % EQ_PRESET_IDS.length] as EqPreset),
       },
       tone('bass', 'BASS'),
@@ -393,6 +402,48 @@ export class SettingsPanel {
           changed();
         });
         place(range, trackX, top, TRACK_W);
+        // The range keeps keyboard and screen-reader control; pointers go through this grip, so a
+        // touch that starts on a slider can still scroll the list. A fader only moves on a tap or
+        // on a drag that is clearly sideways.
+        const grip = document.createElement('div');
+        grip.id = `set-${row.id}-grip`;
+        grip.className = 'settings-grip';
+        grip.setAttribute('aria-hidden', 'true');
+        const apply = (clientX: number): void => {
+          const box = grip.getBoundingClientRect();
+          // The same mapping the knob is drawn with, so the value under the finger is the value set.
+          const f = Math.min(1, Math.max(0, ((clientX - box.left) / t - 2) / (TRACK_W - 4)));
+          const value = Math.round((row.min + f * (row.max - row.min)) / row.step) * row.step;
+          if (value === row.get()) return;
+          range.value = String(value);
+          row.set(value);
+          changed();
+        };
+        let drag: { id: number; x: number; y: number; active: boolean } | null = null;
+        grip.addEventListener('pointerdown', (e) => {
+          drag = { id: e.pointerId, x: e.clientX, y: e.clientY, active: e.pointerType !== 'touch' };
+          if (!drag.active) return;
+          grip.setPointerCapture(e.pointerId);
+          apply(e.clientX);
+        });
+        grip.addEventListener('pointermove', (e) => {
+          if (!drag || drag.id !== e.pointerId) return;
+          if (!drag.active) {
+            const dx = Math.abs(e.clientX - drag.x);
+            if (dx < 8 || dx < Math.abs(e.clientY - drag.y) * 1.5) return;
+            drag.active = true;
+            grip.setPointerCapture(e.pointerId);
+          }
+          apply(e.clientX);
+        });
+        grip.addEventListener('pointerup', (e) => {
+          // A tap (no scroll, no drag) sets the fader to where it landed.
+          if (drag && drag.id === e.pointerId && !drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) apply(e.clientX);
+          drag = null;
+        });
+        // The browser took the gesture for scrolling.
+        grip.addEventListener('pointercancel', () => (drag = null));
+        place(grip, trackX, top, TRACK_W);
       } else if (row.kind === 'toggle') {
         const box = document.createElement('input');
         box.type = 'checkbox';

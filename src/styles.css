@@ -113,6 +113,17 @@ body {
   width: 100%;
 }
 
+/* Pointers use the grip over each slider (see SettingsPanel); the range itself is for keys. */
+#overlay #settings-scroll input[type='range'] {
+  pointer-events: none;
+}
+
+.settings-grip {
+  position: absolute;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
 #overlay input[type='checkbox'] {
   position: absolute;
   margin: 0;

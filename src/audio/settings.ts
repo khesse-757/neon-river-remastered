@@ -33,6 +33,8 @@ export interface AudioSettings {
   theme: Theme['id'];
   /** 'custom' once a tone slider has been moved by hand. */
   eq: EqPreset | 'custom';
+  /** Night listening (quieter, compressed). Set by the Night preset; stays on while its tone is edited. */
+  night: boolean;
   /** dB, -6..6. */
   bass: number;
   mid: number;
@@ -52,6 +54,7 @@ export const DEFAULT_AUDIO: AudioSettings = {
   instrument: 'koto',
   theme: DEFAULT_THEME,
   eq: 'default',
+  night: false,
   bass: 0,
   mid: 0,
   treble: 0,
@@ -86,6 +89,7 @@ export function sanitizeAudio(raw: unknown): AudioSettings {
   if (INSTRUMENTS.includes(r.instrument as Instrument)) out.instrument = r.instrument as Instrument;
   if (THEMES.some((t) => t.id === r.theme)) out.theme = r.theme as Theme['id'];
   if (r.eq === 'custom' || EQ_PRESET_IDS.includes(r.eq as EqPreset)) out.eq = r.eq as AudioSettings['eq'];
+  out.night = flag(r.night, out.eq === 'night');
   out.bass = db(r.bass);
   out.mid = db(r.mid);
   out.treble = db(r.treble);

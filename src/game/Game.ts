@@ -211,7 +211,9 @@ export class Game {
   }
 
   togglePause(): void {
-    if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
+    // Esc / P close the settings panel wherever it is open.
+    if (this.settingsOpen && this.mode !== 'paused') this.settingsOpen = false;
+    else if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
     else if (this.mode === 'paused') this.setMode('playing');
   }
 
@@ -309,19 +311,28 @@ export class Game {
 
   private confirm(): void {
     void this.audio.unlock().then(() => this.audio.startLoops());
+    // With the settings panel open over the title, the win or the results, Enter closes it.
+    if (this.settingsOpen && this.mode !== 'paused') {
+      this.settingsOpen = false;
+      return;
+    }
     if (this.win > 0 && this.mode === 'playing') this.skipWin();
     else if (this.mode === 'title' || this.mode === 'over') {
       this.settingsOpen = false;
       this.startRun();
       // The leitmotif, stated once, as the night begins. The samples were preloaded with the page;
-      // on a very slow first load the sting waits for the real voice, and is dropped rather than
-      // played late or on a stand-in.
+      // on a slow first load the sting waits for its own voice (the small koto sample, not the
+      // music), plays if that arrives within the first four seconds, and is otherwise dropped
+      // rather than played on a stand-in.
       const run = this.runCount;
-      void this.audio.ready(8000).then(() => {
-        const live = this.runCount === run && this.mode === 'playing' && this.sim.state.status === 'playing';
-        const voiced = this.audio.settings.instrument !== 'koto' || this.audio.hasSample('koto');
-        if (live && voiced && this.sim.state.time < 4) this.audio.startSting();
-      });
+      const koto = this.audio.settings.instrument === 'koto';
+      void this.audio
+        .unlock()
+        .then(() => (koto ? this.audio.sample('koto', 4000) : true))
+        .then((voiced) => {
+          const live = this.runCount === run && this.mode === 'playing' && this.sim.state.status === 'playing';
+          if (live && voiced && this.sim.state.time < 4) this.audio.startSting();
+        });
     } else if (this.mode === 'paused') this.setMode('playing');
   }
 
@@ -331,6 +342,7 @@ export class Game {
     this.runCount += 1;
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startStage });
     this.banner = 0;
+    this.settingsOpen = false;
     this.surge = 0;
     this.audio.cancelWarning();
     this.fx = createRng(this.seed ^ 0x9e3779b9);
@@ -440,9 +452,13 @@ export class Game {
         this.audio.warn();
         break;
       case 'telegraphCancel':
-        // The eel is not coming after all: the glow and the crackle let go.
-        this.telegraph = null;
-        this.audio.cancelWarning();
+        // The eel is not coming after all: its glow and crackle let go. The cancel arrives when the
+        // eel would have spawned, so it only applies to a warning that has run its full lead; a
+        // newer warning for the next eel is left alone.
+        if (this.telegraph && this.telegraph.age >= this.config.telegraphLead - 0.1) {
+          this.telegraph = null;
+          this.audio.cancelWarning();
+        }
         break;
       case 'catch': {
         const p = this.fishPoint(event.fish);
@@ -490,7 +506,7 @@ export class Game {
       }
       case 'eelNear': {
         const p = this.fishPoint(event.fish);
-        this.audio.crackle(0.25, 0.18);
+        this.audio.nearMiss();
         this.sparks(p.x, p.y, 10);
         break;
       }
@@ -561,7 +577,8 @@ export class Game {
     // few more with every stage, so the water itself looks faster.
     this.surge = Math.max(0, this.surge - dt);
     const rush = this.surge / SURGE_SECONDS;
-    const streaks = this.mode === 'playing' && this.win === 0 ? state.stageIndex * 4 + 36 * rush * rush : 0;
+    // Reduced motion: no streaks at all; the sign and the stinger announce the speed-up.
+    const streaks = this.mode === 'playing' && this.win === 0 && !this.reducedMotion ? state.stageIndex * 4 + 36 * rush * rush : 0;
     const railSize = this.river.screenAt(1, 0.5).scale;
     this.streakTimer += dt * streaks;
     while (this.streakTimer >= 1) {
@@ -1372,6 +1389,11 @@ export class Game {
       },
       audioLevel: () => this.audio.level(),
       setAudioBeds: (on: boolean) => this.audio.setBeds(on),
+      soloAudio: (name: string | null) => this.audio.setSolo(name),
+      setWeight: (pounds: number) => {
+        this.sim.state.caught = pounds;
+        this.basketWeight = pounds;
+      },
       openAdvancedAudio: (open: boolean) => this.panel.setAdvanced(open),
     };
   }

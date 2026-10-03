@@ -67,11 +67,10 @@ Read `ORIGINAL_FISHING_DESIGN.md` first. Implement:
 ### 3.2 Emitter and lanes
 - One (later two) **sweeping emitters** with `sweep`, `swingMin/Max`,
   `period`, `travelTime`, `eelChance`, `koiChance`, `pinned: 'left'|'right'|null`.
-- Fish **hold their lane** (plus a tiny cosmetic wiggle that does not affect
-  the hitbox). Chains must be readable.
-- **Fairness guards:** (a) non-eel jump > 0.8 width → midpoint, (b) eel within
-  0.35 s of a fish must be ≥ 0.25 width away from it (except in the storm phase
-  where spacing is ≥ 0.18), (c) prove winnability with the oracle bot (§9).
+- Fish **hold their lane** (the swim animation bends the tail, not the
+  position). Chains must be readable.
+- **Fairness guards:** see §3.3 for the current rules and numbers; prove
+  winnability with the oracle bot (§9).
 - **Telegraphs:** the emitter's lane shows a faint shimmer/ripple at the far
   bend; eels announce ~0.6 s early with a crackle sound and a blue under-glow
   at the emitter.
@@ -107,12 +106,13 @@ bank, mixed with fast zigzags and eels dropped into the chain.
 | 3 | Neon Rapids | ×1.25 | 0.62 s | 1.8 s | 40–100% | 0.30 /s | 40% / 1 fish (≈28%) | 8% |
 | 4 | Bank to Bank | ×1.40 | 0.50 s | 1.15 s | 40–100%, bursts after 65% of swings | 0.40 /s | 50% / none (≈46%) | 7% |
 
-- **No down time:** no rests and no separate phases; a spawn is never skipped,
-  so the longest gap without a spawn is the stage's own period; a fish is
+- **No down time:** no rests and no separate phases; at the shipped pace a
+  spawn is never skipped, so the longest gap without a spawn is the stage's own period; a fish is
   always in the half of the river nearest the net. A night starts with the
   river already running: the first fish reaches the net at about 1.5 s.
 - **Smoothness:** a fish never changes lane after it spawns; every fish
-  spawns exactly on the emitter (no fairness relocation); the swim animation
+  spawns exactly on the emitter (the fairness guards that can move or drop a
+  spawn never fire at the shipped pace, only when `?tune` pushes it); the swim animation
   keeps the head on its lane (the tail works, the body does not wander); the
   chain reads as a curve. The only jump is Bank to Bank's swap, which is the
   pattern.
@@ -214,7 +214,7 @@ light and sound — never color alone.
   Silkscreen or Pixelify Sans as fallbacks). Crisp at every size.
 - **HUD:** keep v1's "stone tablet" idea: carved tablet with caught-weight
   progress toward 200 and an escaped budget of 20 notches; streak badge; phase
-  banner as a hanging wooden sign during rests. Never over the river's play path.
+  banner as a hanging wooden sign at the start and at each speed-up. Never over the river's play path.
 - Screens: Title (painting + logo, "tap to fish"), Pause, Settings (music, SFX,
   mute, touch mode, sensitivity, assist, reduced motion, reduce flashing), Win
   (time, accuracy, best streak, rating, floating lanterns), Loss (eel / escaped

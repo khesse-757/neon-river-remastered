@@ -66,39 +66,62 @@ for (const [name, saved] of Object.entries({
   });
 }
 
-test('in-game start sting, catch, eel shock and win fanfare all reach the output', async ({ page }) => {
-  test.setTimeout(120_000);
+test('in-game start sting, catch, eel shock and win fanfare each reach the output', async ({ page }) => {
+  test.setTimeout(150_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/?seed=42');
   await expect.poll(() => mode(page), { timeout: 20_000 }).toBe('title');
-  // Beds off: each sound is measured against silence.
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setAudioBeds(false));
+  // Beds off and one sound soloed at a time: a level at the output can only be the sound named.
+  const solo = (name: string | null) =>
+    page.evaluate((n) => {
+      window.__THREE_GAME_TEST_HOOKS__?.setAudioBeds(false);
+      window.__THREE_GAME_TEST_HOOKS__?.soloAudio(n);
+    }, name);
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.fishNotes)).toBe(false);
 
+  await solo('start');
   await page.locator('#btn-start').click();
   await expect.poll(() => mode(page)).toBe('playing');
-  expect(await peak(page, 5000), 'start sting').toBeGreaterThan(AUDIBLE);
+  expect(await peak(page, 6000), 'start sting').toBeGreaterThan(AUDIBLE);
 
-  // Keep the net out of the stream so nothing sounds until a fish is dropped on it.
-  await page.keyboard.down('ArrowLeft');
+  // Nothing else is allowed to sound while 'start' is soloed: once the sting has rung out, the
+  // night is silent even though fish are being caught and missed.
   await quiet(page);
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('bluegill'));
-  expect(await peak(page, 3000), 'catch').toBeGreaterThan(AUDIBLE);
-  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.caught ?? 0)).toBeGreaterThan(0);
+  expect(await peak(page, 1500), 'other sounds while soloed').toBeLessThan(AUDIBLE);
 
+  await solo('catch');
+  const before = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.caught ?? 0);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('bluegill'));
+  expect(await peak(page, 4000), 'catch').toBeGreaterThan(AUDIBLE);
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.caught ?? 0)).toBeGreaterThan(before);
+
+  // The win, through the real path: one pound short, then a fish in the net.
+  await solo('win');
+  await quiet(page);
+  await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.setWeight(199);
+    window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('koi');
+  });
+  expect(await peak(page, 6000), 'win fanfare').toBeGreaterThan(AUDIBLE);
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.status)).toBe('won');
+  await expect.poll(() => mode(page), { timeout: 20_000 }).toBe('over');
+
+  await solo('eel');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => mode(page)).toBe('playing');
   await quiet(page);
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('eel'));
-  expect(await peak(page, 3000), 'eel shock').toBeGreaterThan(AUDIBLE);
+  expect(await peak(page, 4000), 'eel shock').toBeGreaterThan(AUDIBLE);
   await expect.poll(() => mode(page), { timeout: 10_000 }).toBe('over');
-  await page.keyboard.up('ArrowLeft');
-
-  await quiet(page);
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('win'));
-  expect(await peak(page, 5000), 'win fanfare').toBeGreaterThan(AUDIBLE);
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.lossCause)).toBe('eel');
 
   // Master mute silences the game (but, above, never the audition page).
+  await solo(null);
   await page.locator('#btn-mute').click();
-  await quiet(page);
+  await page.locator('#btn-retry').click();
+  await expect.poll(() => mode(page)).toBe('playing');
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('bluegill'));
+  expect(await peak(page, 2500), 'muted').toBeLessThan(QUIET);
   expect(errors).toEqual([]);
 });

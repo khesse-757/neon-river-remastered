@@ -36,6 +36,10 @@ describe('audio settings', () => {
     expect(out.instrument).toBe('koto');
     expect(out.theme).toBe('heron');
     expect(out.eq).toBe('night');
+    // An older save that chose Night keeps Night's quieter output.
+    expect(out.night).toBe(true);
+    expect(sanitizeAudio({ eq: 'custom', night: true }).night).toBe(true);
+    expect(sanitizeAudio({ eq: 'warm' }).night).toBe(false);
     expect(out.bass).toBe(EQ_RANGE);
     expect(out.mid).toBe(0);
     expect(out.treble).toBe(-2);
