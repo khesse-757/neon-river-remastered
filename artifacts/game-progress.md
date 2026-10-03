@@ -20,6 +20,49 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 - [ ] Gate 3 — Polish + QA pass
 - [ ] Gate 4 — Release candidate
 
+## Current state (2026-10-03, HEAD 02ae163 on `gate-1.5/art-v2`, PR #2 draft, CI green)
+
+Stopped at Kyle's request after Gate 1.5 round 2. Waiting on Kyle; do not merge PR #2 or start Gate 2 until he says so.
+
+### Decisions pending from Kyle
+1. **Motif:** pick one on `?audition` (Lantern is the default; Heron and Ripple are the alternatives).
+2. **Pace feel:** play it and say whether it is now lively enough; if not, try `?tune` and paste the copied values back.
+3. **Spawn period:** keep 0.42 s with a heavy late eel share, or accept faster wins / a different escape rule to get nearer the 0.28 s he asked for (see "Pace" below for why both cannot hold).
+4. **Look approval** for Gate 1.5 (v2 direction and capped actor resolution are already approved), or a list of changes.
+5. **Audio by ear:** motifs, voice warmth, mix balance, ducking, loop seams. None of it has been heard by anyone; only timing, routing and levels are measured.
+6. **Real phone pass:** touch feel, safe areas on a real notch, Safari, frame rate.
+
+### Links
+- PR #2: https://github.com/khesse-757/neon-river-remastered/pull/2 (PR #1 merged; `main` ruleset `protect-main`, id 24406934, active)
+- Dev pages (dev server, default port 5188): `/?tune` (pace multipliers, docked strip, "copy values"), `/?audition` (three motifs), `/?theme=lantern|heron|ripple`, `/?actors=device`, `/?debug`
+- Videos: `docs/media/gate-1.5/full-run-desktop.webm`, `full-run-mobile.webm` (bot-played night to the win), `eel-basket-desktop.webm`, `eel-basket-mobile.webm`
+- Stills: `docs/media/gate-1.5/` — `win-*`, `win-results-*`, `eel-basket-*`, `eel-storm-*`, `title-settings-*`, `pause-mix-*`, `koi-scoop-*`, `eel-near-*`, `early-phase-*`, `rest-banner-*`, `v1-vs-gate1-vs-gate1.5.png`, `sheet-actors-device-vs-capped-mobile.png`
+- The videos and stills were recorded at b344968, one commit before the final win-wash and basket-glow tweak, so the win in them is slightly warmer than the current build. Re-record before using them for the blog.
+- Bot numbers: `npm run playtest -- --oracle 100 --human 200` (writes `artifacts/playtest.json`)
+
+### Open minors (none are blockers or majors)
+- Fisherman's win cheer does not read (reviewer round 4).
+- About 4.7 eel warnings per run are orphaned when a phase ends: crackle and glow for an eel that never comes. No eel is ever unwarned.
+- First load slower than 2.5 s: the start sting plays on the fallback voice, off the music grid.
+- Open `?tune` dock hides the net at 320×568 and in landscape (dev tool only).
+- Pause/settings panel sits at exactly 100 draw calls (mobile budget 100); textures 57–81 vs the inspector's starting budget of 40. Both come from one quad/texture per UI element; atlas the UI in Gate 2.
+- Difficulty rises in steps (flat 0–45 s and 60–120 s, most losses after 2:00) rather than continuously.
+- Eel-window fairness guard is never exercised with a single emitter; it will matter when Braided Stream gets its second emitter.
+- Focus ring crosses neighbouring text at 1 CSS px per texel (320×568, 844×390).
+- Net looks detached at lane 1 and its cloth overlaps the parapet at lane 0.
+- No landscape orientation hint on phones; tablet portrait crowds the top-left HUD.
+- Fry smoke is visible but faint.
+- `SceneRenderer.dispose()` does not free every GPU resource (HMR only); the end-of-run screen steps the sim with a variable delta.
+- `dist/` ships files the game never loads (original 2.2 MB painting, three unused grids, source maps): Gate 4.
+- Sliders are a few percent off near the track ends (native thumb width).
+
+### Not verified by anyone
+- Audio by ear; real phone / Safari / gamepad; a truly hidden tab during the win; frame rate on a mid-range phone (59 fps is from a desktop Apple GPU).
+- The last commit (02ae163: win wash, basket glow, sting guard) and the test-timeout fix (c64efb5) were not seen by the reviewer; CI is green on both.
+
+### Environment note
+- A vite dev server that this session did not start is listening on 5188 from the main checkout (PID 17287 when last seen). Left alone. Playwright's config reuses whatever is on 5188, so `npm run test:e2e` tests that server's tree while it is up.
+
 ## Gate 1.5, round 2 (Kyle's review of 2026-10-03) — pace, leitmotif, win
 
 Kyle: v2 look is the right direction; capped actor resolution approved. Not approved yet. This round, on the same branch / PR #2:
@@ -143,7 +186,7 @@ Not fixed (recorded): net reads as floating at lane 1 and its cloth overlaps the
 - Ambience loop seam (measured, not heard): 22.0 s, no leading/trailing silence, wrap jump 0.001 vs typical sample step 0.009, first/last second within 2 dB.
 
 ## Pending jobs / task IDs
-- None. ElevenLabs: 3 sound-effect generations done (ambience loop, two splashes). Full batch waits for Gate 2.
+- None running. ElevenLabs generations so far (sources in `assets-src/audio/`): ambience loop, two catch splashes, calm music loop, koto pluck, chime. The rest of the audio matrix (rain, thunder, storm music layer, UI sounds) waits for Gate 2.
 
 ## Fresh-eyes review (2026-10-02, HEAD 4d1a553): "needs fixes" — 6 majors, 12 minors
 Fixed after the review (not re-reviewed by the agent; verified by my own captures, unit tests and e2e):
@@ -170,6 +213,6 @@ Fixed after the review (not re-reviewed by the agent; verified by my own capture
 - Brief flags 1 and 3 (win time vs table; Braided Stream density) are open until Gate 2.
 
 ## Next actions
-1. Kyle: review look-dev (grid choice, flat vs voxel fish, lantern), play on a real phone.
-2. Kyle: approve or edit the proposed `main` ruleset call.
-3. After approval: merge PR #1 (Kyle), start Gate 2 on `gate-2/full-loop`.
+1. Kyle: the six pending decisions at the top of this file.
+2. After his notes: apply them on `gate-1.5/art-v2`, re-record the gate-1.5 media, re-run the playtester and the fresh-eyes-reviewer if code changed.
+3. On approval: Kyle merges PR #2; Gate 2 starts on `gate-2/full-loop` (second emitter for Braided Stream, weather beats per phase, assist, Hard River, settings for touch mode / reduced motion / reduce flashing, UI atlas, smoother difficulty climb).
