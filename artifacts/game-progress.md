@@ -18,7 +18,7 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 - [x] Gate 1 — Look-dev slice: merged as the foundation (PR #1, 2026-10-03). Look NOT approved: too flat and low-res.
 - [x] Gate 1.5 — Art direction v2 + audio: approved by Kyle after round 3; merged (PR #2, 2026-10-03)
 - [x] Gate 2 — Feature complete (`prompts/02-feature-complete.md`): merged (PR #3, 2026-10-03, CI green on b9f6b9c)
-- [ ] Gate 3 — Release (`prompts/03-release.md`): in progress on `release/v2.0.0`; waiting for Kyle's go to merge (the merge is the first deploy)
+- [x] Gate 3 — Release: **Released v2.0.0** (2026-10-03). PR #6 merged (f4e574b), live at https://neonriver2.kahdev.me with HTTPS enforced, tag `v2.0.0` and the GitHub release created
 
 Working rules changed on 2026-10-03: CLAUDE.md now has a **verification budget (lean mode)**; the playtester agent runs on Sonnet.
 
@@ -31,7 +31,8 @@ Working rules changed on 2026-10-03: CLAUDE.md now has a **verification budget (
 - **Freesound:** nilbul's "Water splash" (id 404829) is CC0. v1 never recorded the id; the durations fit a trimmed copy but the match is not confirmed by ear.
 - **Fresh-eyes review of the release candidate (9375495, production build): ship-ready, no blockers or majors.** Fixed: `404.html` scrolled by 48 px; ARCHITECTURE said three input intents (there are four); the share image's alt text mentioned a river that is not in the picture. Left open (minor): no landscape-phone handling or orientation hint; hook states `phase.storm-surge` / `phase.black-water` are documented but throw (`stageIds` is built from Normal's stages only); `phase:bank-to-bank` at seed 42 ends on an eel during the settle; three look-dev grids (0.55 MB) still ship for `?grid=`.
 - **No tuning changes in this gate.**
-- **Still to do, in order:** Kyle's go → merge → first deploy → enforce HTTPS → verify the live site on desktop and a phone viewport → Kyle's go → tag `v2.0.0` and the GitHub release. Then `gh repo edit` for the description, homepage and topics (Kyle approves the call).
+- **Released.** First deploy green; live site checked on desktop and a 390×844 phone viewport (loads, plays, no console errors or failed requests, manifest and OG tags present, 404 page served). Repo description, homepage and topics set. Follow-up: workflow actions bumped to their current majors (Node 20 deprecation warnings).
+- **Left for Kyle:** upload `docs/media/social-preview.png` in Settings → General; real-device, Safari, gamepad and by-ear checks; the open minors in the review line above.
 
 ## State at the end of Gate 2 (2026-10-03)
 
