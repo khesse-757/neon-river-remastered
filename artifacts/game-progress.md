@@ -32,6 +32,7 @@ Working rules changed on 2026-10-03: CLAUDE.md now has a **verification budget (
 - **Fresh-eyes review of the release candidate (9375495, production build): ship-ready, no blockers or majors.** Fixed: `404.html` scrolled by 48 px; ARCHITECTURE said three input intents (there are four); the share image's alt text mentioned a river that is not in the picture. Left open (minor): no landscape-phone handling or orientation hint; hook states `phase.storm-surge` / `phase.black-water` are documented but throw (`stageIds` is built from Normal's stages only); `phase:bank-to-bank` at seed 42 ends on an eel during the settle; three look-dev grids (0.55 MB) still ship for `?grid=`.
 - **No tuning changes in this gate.**
 - **Released.** First deploy green; live site checked on desktop and a 390×844 phone viewport (loads, plays, no console errors or failed requests, manifest and OG tags present, 404 page served). Repo description, homepage and topics set. Follow-up: workflow actions bumped to their current majors (Node 20 deprecation warnings).
+- **2.0.1 fix (branch `fix/net-parallax`):** the far layer's parallax no longer follows the net (was `(netLane - 0.5) * 3` texels, so the skyline stepped sideways with every move). The slow sine drift (±1.2 texels) stays; CAMERA DRIFT still turns it off.
 - **Left for Kyle:** upload `docs/media/social-preview.png` in Settings → General; real-device, Safari, gamepad and by-ear checks; the open minors in the review line above.
 
 ## State at the end of Gate 2 (2026-10-03)

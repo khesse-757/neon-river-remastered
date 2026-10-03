@@ -506,3 +506,11 @@ several things together, aimed at where the human-like bot leaked pounds, to rea
 8. `docs/media/gate-1.5-r3/full-run-desktop.mp4` — a whole bot-played night.
 9. `docs/media/gate-2/looks.png` — the four looks.
 10. `docs/media/readme/eel-shock.png` — the blackout when an eel reaches the net.
+
+### After release: the city moved with the net
+
+Kyle's first bug on the live site: moving the net shifted the whole skyline. It was deliberate and
+wrong. The far layer's parallax was `(net lane - 0.5) * 3` texels plus a slow sine, a leftover
+"camera follows the player" idea, and because the layer moves in whole texels the sky and city
+jumped up to three texels (12 px on a 4x screen) as the net crossed the river. The net term is gone;
+the slow drift stays and CAMERA DRIFT still switches it off.
