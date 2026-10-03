@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { RIVER } from '../src/data/river';
 import { HumanBot } from '../src/sim/bots/human';
 import { oracleIntent } from '../src/sim/bots/oracle';
-import { DEFAULT_CONFIG } from '../src/sim/config';
+import { configFor } from '../src/sim/modes';
 import type { NetIntent } from '../src/sim/net';
 import { River } from '../src/sim/river';
 import { Sim } from '../src/sim/sim';
@@ -31,6 +31,10 @@ interface Run {
   emptyZone: number;
   /** Largest lane step between consecutive catchable spawns while sweeping (bank jumps excluded). */
   maxStep: number;
+  /** S-runs started, fish in them, and the tightest gap between two spawns. */
+  runs: number;
+  runFish: number;
+  minGap: number;
   caught: number;
   escaped: number;
   bestStreak: number;
@@ -40,6 +44,9 @@ interface Run {
 }
 
 const river = new River(RIVER);
+// --mode zen plays the eel-free mode.
+const modeArg = process.argv.indexOf('--mode');
+const CONFIG = configFor(modeArg >= 0 ? process.argv[modeArg + 1] : 'normal');
 const median = (values: number[]): number => {
   if (values.length === 0) return NaN;
   const s = [...values].sort((a, b) => a - b);
@@ -52,7 +59,7 @@ const quantile = (values: number[], q: number): number => {
 };
 
 function play(seed: number, pick: (sim: Sim) => NetIntent): Run {
-  const sim = new Sim({ seed, river, config: DEFAULT_CONFIG });
+  const sim = new Sim({ seed, river, config: CONFIG });
   const curve: number[] = [];
   let firstCatch: number | null = null;
   const speedUps: number[] = [];
@@ -61,12 +68,20 @@ function play(seed: number, pick: (sim: Sim) => NetIntent): Run {
   let emptyZone = 0;
   let lastLane: number | null = null;
   let maxStep = 0;
+  let runs = 0;
+  let runFish = 0;
+  const gaps: number[] = [];
   while (sim.state.status === 'playing' && sim.state.time < LIMIT) {
     const pinned = sim.state.emitter.pinFish > 0;
     sim.step(DT, pick(sim));
     for (const e of sim.drainEvents()) {
       if (e.type === 'stage' && e.index > 0) speedUps.push(sim.state.time);
+      if (e.type === 'run') {
+        runs += 1;
+        runFish += e.fish;
+      }
       if (e.type !== 'spawn') continue;
+      gaps.push(sim.state.time - lastSpawn);
       maxGap = Math.max(maxGap, sim.state.time - lastSpawn);
       lastSpawn = sim.state.time;
       if (e.fish.kind === 'eel') continue;
@@ -90,6 +105,9 @@ function play(seed: number, pick: (sim: Sim) => NetIntent): Run {
     maxGap,
     emptyZone,
     maxStep,
+    runs,
+    runFish,
+    minGap: Math.min(...gaps.slice(1)),
     caught: s.caught,
     escaped: s.escaped,
     bestStreak: s.bestStreak,
@@ -131,6 +149,9 @@ function summarize(name: string, runs: Run[]): Record<string, unknown> {
     ),
     maxSpawnGap: +Math.max(...runs.map((r) => r.maxGap)).toFixed(3),
     emptyNetZoneSecondsMedian: +median(runs.map((r) => r.emptyZone)).toFixed(2),
+    runsPerNightMedian: median(runs.map((r) => r.runs)),
+    runFishMedian: median(runs.map((r) => r.runFish)),
+    minSpawnGap: +Math.min(...runs.map((r) => r.minGap)).toFixed(3),
     maxSweepStep: +Math.max(...runs.map((r) => r.maxStep)).toFixed(3),
     // Median lb caught at each time mark, over all runs (wins hold at 200).
     paceCurve: Object.fromEntries(MARKS.map((t, i) => [t, median(runs.map((r) => r.curve[i] ?? 0))])),

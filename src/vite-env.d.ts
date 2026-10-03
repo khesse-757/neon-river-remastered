@@ -7,6 +7,8 @@ interface ThreeGameDiagnostics {
   /** Stage id (still-water, quickening, neon-rapids, bank-to-bank) and its index 0..3. */
   phase: string;
   stage: number;
+  /** Game mode id: normal, zen. */
+  gameMode: string;
   /** The settings panel is open (pause, or the gear on other screens). */
   settings: boolean;
   status: string;
@@ -56,6 +58,8 @@ interface ThreeGameTestHooks {
   soloAudio(name: string | null): void;
   /** Set the weight caught so far (to reach a real win with one more fish). */
   setWeight(pounds: number): void;
+  /** Go to the title screen and choose a game mode (normal, zen). */
+  setGameMode(id: string): void;
   /** Expand or collapse the Advanced audio section of the settings panel. */
   openAdvancedAudio(open: boolean): void;
 }

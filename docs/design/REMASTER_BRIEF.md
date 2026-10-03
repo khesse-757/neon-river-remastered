@@ -99,16 +99,29 @@ them distracting). **Spawning never pauses for an announcement.**
 swap sides: a burst of 2–4 pinned at one bank, then immediately the other
 bank, mixed with fast zigzags and eels dropped into the chain.
 
-| # | Stage (sign) | Fish speed | Spawn period | Bank-to-bank sweep | Swing length | Reversals | Eel roll / spacing | Koi |
+| # | Stage (sign) | Fish speed | Mean gap between runs | S-run: fish, gaps | Bank-to-bank sweep (run) | Reversals | Eel roll / spacing | Koi |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Still Water | ×1 (3.0 s far bend → net) | 0.90 s | 4.0 s | always full | none | 6.7% / 5 fish (≈5% of spawns) | 8% |
-| 2 | Quickening | ×1.12 | 0.74 s | 3.0 s | 55–100% | 0.12 /s | 22% / 2 fish (≈15%) | 8% |
-| 3 | Neon Rapids | ×1.25 | 0.62 s | 1.8 s | 40–100% | 0.30 /s | 40% / 1 fish (≈28%) | 8% |
-| 4 | Bank to Bank | ×1.40 | 0.50 s | 1.15 s | 40–100%, bursts after 65% of swings | 0.40 /s | 50% / none (≈46%) | 7% |
+| 1 | Still Water | ×1 (3.0 s far bend → net) | 1.02 s | 8–10, 0.50 → 0.38 s, no eels | 4.0 s (2.6 s) | none | 6.7% / 5 fish | 8% |
+| 2 | Quickening | ×1.12 | 0.88 s | 9–11, 0.46 → 0.34 s, eel 5% | 3.0 s (2.3 s) | 0.12 /s | 22% / 2 fish | 8% |
+| 3 | Neon Rapids | ×1.25 | 0.76 s | 10–12, 0.42 → 0.31 s, eel 9% | 1.8 s (2.0 s) | 0.30 /s | 40% / 1 fish | 8% |
+| 4 | Bank to Bank | ×1.40 | 0.56 s | 10–13, 0.38 → 0.29 s, eel 12% | 1.15 s (1.8 s) | 0.40 /s | 50% / none | 7% |
+
+**The stream is never evenly spaced.** Two rhythms alternate:
+
+- **S-runs.** A tight chain of 1-lb fish snaking bank to bank, like the
+  original's stream: the gaps between its fish shrink and its sweep quickens
+  as it goes. One arrives with every speed-up, so the current is picking up
+  while the player is catching it, and runs recur every 15–22 s (about eight a
+  night, roughly 80 of the night's fish). From Quickening on, an eel may be
+  planted in the S to steer around (never its first two fish or its last).
+- **Between runs** the gaps wander: each is the stage's mean gap times a
+  random 0.7–1.3, with koi and eels in the mix. An eel always keeps at least
+  0.38 s from its neighbours in time.
 
 - **No down time:** no rests and no separate phases; at the shipped pace a
-  spawn is never skipped, so the longest gap without a spawn is the stage's own period; a fish is
-  always in the half of the river nearest the net. A night starts with the
+  spawn is never skipped, so the longest gap without a spawn is 1.3 × the stage's mean gap (1.33 s in Still Water, 0.73 s in Bank to Bank); a fish is
+  nearly always in the half of the river nearest the net (the lulls are the
+  water between S-runs). A night starts with the
   river already running: the first fish reaches the net at about 1.5 s.
 - **Smoothness:** a fish never changes lane after it spawns; every fish
   spawns exactly on the emitter (the fairness guards that can move or drop a
@@ -118,13 +131,11 @@ bank, mixed with fast zigzags and eels dropped into the chain.
   pattern.
 - **Pace targets for a solid player:** speed-ups near 0:30 / 1:00 / 1:30 and
   200 lb in about 2:00–2:30.
-- **Why the spawn period is not 0.5 s from the start:** only 20 lb may escape,
-  so the weight spawned by any moment is, within 20 lb, the weight a winner has
-  caught by then. A 2:00–2:30 win fixes the supply at about 1.5 lb/s. Still
-  Water's mix (8% koi, 5% eels) is worth 1.27 lb per spawn, so its period has
-  to be near 0.9 s; at 0.5 s the first speed-up would come at 0:18 and the win
-  at about 1:20. Later stages get denser because more of their spawns are
-  eels, which weigh nothing. Bank to Bank reaches 0.5 s.
+- **Why the stream is not dense all night:** only 20 lb may escape, so the
+  weight spawned by any moment is, within 20 lb, the weight a winner has caught
+  by then. A 2:00–2:30 win fixes the supply at about 1.5 lb/s. The S-runs spend
+  that budget in bursts (2–3.5 fish a second while one lasts); the water
+  between them is sparser to pay for it.
 - **Fairness:** every eel is warned 0.6 s before it appears, and the warning
   is called off if the eel will not come; while sweeping, a non-eel is never
   further from the last one than half of what the capped net can cover in the
@@ -133,6 +144,18 @@ bank, mixed with fast zigzags and eels dropped into the chain.
   without touching an eel (§9).
 - **Assist ("the river calms")** and **Endless "Hard River"** are unchanged in
   intent and are Gate 2.
+
+### 3.3a Game modes
+
+Chosen on the title screen (a button that cycles), saved, and defined in
+`src/sim/modes.ts` as a name plus a function over the base tuning, so adding a
+mode is adding an entry.
+
+- **Normal:** the night described above.
+- **Zen:** the same river, runs and speed-ups with no eels. An eel's place in
+  the stream is left empty (never two in a row), so the catch and the pace stay
+  close to Normal's. The 200-lb goal and the 20-lb escape rule still apply.
+- More modes later (Hard River, timed, endless) plug into the same list.
 
 ### 3.4 Net feel
 - Net moves along a 1-D rail across the river at the catch zone, drawn as a

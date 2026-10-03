@@ -13,8 +13,25 @@ export interface StageSpec {
   readonly name: string;
   /** Fish speed, as a multiple of the base travel time's speed. */
   readonly speed: number;
-  /** Seconds between spawns. */
+  /** Mean seconds between spawns outside an S-run; each gap is this times a random factor from `spacing`. */
   readonly period: number;
+  /**
+   * The S-run: a tight chain of 1-lb fish snaking bank to bank, whose spacing and sweep tighten as it
+   * goes. One starts at every speed-up (the game speeds up while you are catching it) and they
+   * recur every `every` seconds.
+   */
+  readonly run: {
+    /** Fish in a run: [fewest, most]. */
+    readonly fish: readonly [number, number];
+    /** Seconds between its fish: [first gap, last gap]. */
+    readonly period: readonly [number, number];
+    /** Bank-to-bank seconds at the start of the run; 30% quicker by its end. */
+    readonly crossing: number;
+    /** Chance that a fish inside the run is an eel to steer around (never the first two or the last). */
+    readonly eelChance: number;
+    /** Seconds between runs: [shortest, longest]. */
+    readonly every: readonly [number, number];
+  };
   /** Seconds for the emitter to cross the river bank to bank. */
   readonly crossing: number;
   /** A swing covers between this share and all of the way to the far bank (1 = always bank to bank). */
@@ -76,6 +93,10 @@ export interface SimConfig {
   readonly scoopSeconds: number;
   /** Progress past the rail at which a fish is gone under the bridge. */
   readonly exitProgress: number;
+  /** False in modes without eels: a rolled eel leaves its place in the stream empty. */
+  readonly eels: boolean;
+  /** Outside an S-run, each gap between spawns is the stage period times a factor in this range. */
+  readonly spacing: readonly [number, number];
   /** Seconds from the far bend to the net at speed 1. */
   readonly travel: number;
   /** Time constant of the current picking up speed at a speed-up. */
@@ -101,7 +122,8 @@ export const STAGES: readonly StageSpec[] = [
     id: 'still-water',
     name: 'Still Water',
     speed: 1,
-    period: 0.9,
+    period: 1.02,
+    run: { fish: [8, 10], period: [0.5, 0.38], crossing: 2.6, eelChance: 0, every: [15, 20] },
     crossing: 4,
     swingMin: 1,
     reversals: 0,
@@ -113,7 +135,8 @@ export const STAGES: readonly StageSpec[] = [
     id: 'quickening',
     name: 'Quickening',
     speed: 1.12,
-    period: 0.74,
+    period: 0.88,
+    run: { fish: [9, 11], period: [0.46, 0.34], crossing: 2.3, eelChance: 0.05, every: [16, 22] },
     crossing: 3.0,
     swingMin: 0.55,
     reversals: 0.12,
@@ -125,7 +148,8 @@ export const STAGES: readonly StageSpec[] = [
     id: 'neon-rapids',
     name: 'Neon Rapids',
     speed: 1.254,
-    period: 0.62,
+    period: 0.76,
+    run: { fish: [10, 12], period: [0.42, 0.31], crossing: 2.0, eelChance: 0.09, every: [16, 22] },
     crossing: 1.8,
     swingMin: 0.4,
     reversals: 0.3,
@@ -137,7 +161,8 @@ export const STAGES: readonly StageSpec[] = [
     id: 'bank-to-bank',
     name: 'Bank to Bank',
     speed: 1.405,
-    period: 0.5,
+    period: 0.56,
+    run: { fish: [10, 13], period: [0.38, 0.29], crossing: 1.8, eelChance: 0.12, every: [15, 20] },
     crossing: 1.15,
     swingMin: 0.4,
     reversals: 0.4,
@@ -152,8 +177,11 @@ export const DEFAULT_CONFIG: SimConfig = {
   winWeight: 200,
   maxEscaped: 20,
   bannerSeconds: 1.6,
+  eels: true,
+  spacing: [0.7, 1.3],
   travel: 3.0,
-  speedEase: 0.25,
+  // The current picks up gradually, while the speed-up's S-run is coming down the river.
+  speedEase: 1.0,
   banks: [0.08, 0.92],
   prefillSeconds: 1.4,
   tune: { speed: 1, density: 1, sweep: 1, eel: 1 },

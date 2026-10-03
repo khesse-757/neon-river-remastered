@@ -57,6 +57,30 @@ Stopped for Kyle's review after round 3. Do not merge PR #2 or start Gate 2 unti
 ### Environment note
 - A vite dev server that this session did not start is listening on 5188 from the main checkout (PID 17287). Left alone; Playwright reuses it locally.
 
+## Gate 1.5, round 3b (Kyle playing the build, 2026-10-03) — S-runs, modes, HUD moves
+
+Kyle's notes while playing: fish were always evenly spaced in time; he wants a portion of the game to be an S-pattern catch while the game speeds up, like Jak and Daxter, with electric eels to avoid; and game modes (Zen without shocks, Normal, more later). Also: HOME button; desktop score placement; the neon surge and tablet pulse removed.
+
+- **S-runs** (`StageSpec.run`): a tight chain of 1-lb fish, bank to bank, whose gaps shrink (e.g. 0.50 → 0.38 s in Still Water, 0.38 → 0.29 s in Bank to Bank) and whose sweep quickens 30% as it goes. One is queued at every speed-up and they recur every 15–22 s: about 8 a night, ~80 fish. Eels can be planted in a run from Quickening on (5 / 9 / 12%).
+- **Uneven spacing** (`SimConfig.spacing` 0.7–1.3): between runs each gap is the stage's mean gap times a random factor. Mean gaps are now 1.02 / 0.88 / 0.76 / 0.56 s (were fixed periods of 0.90 / 0.74 / 0.62 / 0.50 s): the runs spend the weight budget, the water between pays for it.
+- An eel keeps ≥ 0.38 s from its neighbours in time, so nothing is ever moved sideways to be fair. `speedEase` 0.25 → 1.0 s: the current picks up while the speed-up's run comes down.
+- **Modes** (`src/sim/modes.ts`): Normal and Zen (no eels; an eel's place is left empty, never two in a row). Title-screen button, saved under `neonriver2_mode`, `?mode=zen`, hook `setGameMode`.
+- **HOME** on the pause panel and results. **Desktop HUD:** gear and mute at the painting's top-left; the score tablet below the painting, or beside its foot in the left gutter when the window has no room below.
+
+Bots after this change (my runs of `npm run playtest`, 100 oracle / 300 human-like seeds; the playtester agent's independent run is recorded below when it returns):
+
+| | Normal | Zen (60 / 200 seeds) |
+| --- | --- | --- |
+| Oracle | 100%, 0 eel contacts | 100% |
+| Human-like win rate | 60% (73 eel / 48 escaped losses) | 100% |
+| Human-like median win (p25–p75) | 2:09 (2:03–2:15) | 2:03 |
+| Speed-ups, human-like median | 0:30 / 1:01 / 1:32 | 0:30 / 1:01 / 1:31 |
+| Longest gap without a spawn | 1.33 s | 2.6 s |
+| S-runs per night / fish in them | 8 / 82 | 7 / 75 |
+| Tightest gap | 0.28 s | 0.28 s |
+
+Open from this change: net zone empty ~6.9 s per night in Normal (was 0.55 s with fixed periods; the sparser water between runs), and gaps up to 2.6 s in Zen (about 21 s a night with nothing near the net). Kyle should say whether the lulls between runs feel like rhythm or like down time. Zen keeps the 20-lb escape rule (my call; he asked only for "without getting shocked").
+
 ## Gate 1.5, round 3 (Kyle's notes of 2026-10-03) — the dance, calmer audio
 
 ### Fish pattern (brief §3.3 rewritten)

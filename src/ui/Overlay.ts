@@ -1,6 +1,6 @@
 import type { LossCause } from '../sim/sim';
 
-export type ButtonName = 'start' | 'resume' | 'retry' | 'home' | 'settings' | 'mute';
+export type ButtonName = 'start' | 'resume' | 'retry' | 'home' | 'mode' | 'settings' | 'mute';
 export type ControlName = ButtonName;
 
 export interface RunSummary {
@@ -38,7 +38,7 @@ export class Overlay {
   private texel = 2;
 
   constructor(handlers: OverlayHandlers) {
-    for (const name of ['start', 'resume', 'retry', 'home', 'settings', 'mute'] as const) {
+    for (const name of ['start', 'resume', 'retry', 'home', 'mode', 'settings', 'mute'] as const) {
       const button = el<HTMLButtonElement>(`#btn-${name}`);
       button.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -53,6 +53,10 @@ export class Overlay {
   setTexel(px: number): void {
     this.texel = px;
     document.documentElement.style.setProperty('--texel', `${px}px`);
+  }
+
+  setGameMode(name: string): void {
+    this.controls.get('mode')?.setAttribute('aria-label', `Game mode: ${name}. Change mode`);
   }
 
   setMuted(muted: boolean): void {

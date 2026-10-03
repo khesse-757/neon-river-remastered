@@ -58,6 +58,16 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
 
   await expectCornerControls(page, 'title');
   const mobile = testInfo.project.name.includes('mobile');
+
+  // The mode button on the title cycles Normal -> Zen -> Normal, changes the rule line's promise and is saved.
+  const press = (selector: string) => (mobile ? page.locator(selector).tap() : page.locator(selector).click());
+  expect((await diag(page))?.gameMode).toBe('normal');
+  await press('#btn-mode');
+  await expect.poll(async () => (await diag(page))?.gameMode).toBe('zen');
+  expect(await page.evaluate(() => localStorage.getItem('neonriver2_mode'))).toBe('zen');
+  await expect(page.locator('#btn-mode')).toHaveAttribute('aria-label', /Zen/);
+  await press('#btn-mode');
+  await expect.poll(async () => (await diag(page))?.gameMode).toBe('normal');
   if (mobile) await page.locator('#btn-start').tap();
   else await page.locator('#btn-start').click();
   await expect.poll(() => mode(page)).toBe('playing');

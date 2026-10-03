@@ -310,3 +310,27 @@ Kyle asked for a neon surge at each speed-up and a pulse on the score tablet.
 After playing the build he asked for both to go: distracting.
 The speed-up is now its stinger, its sign and some quiet streaks of current.
 The cheapest playtest is still the owner playing it.
+
+### Round 3b: he played it, and asked for the thing the original had
+
+Kyle's note after playing: "They are always evenly spaced in time." He was
+right, and it was my fix for "down time" that did it: one fixed period per
+stage. The original's stream is not a metronome. It comes in snaking chains
+that speed up under your net.
+
+- **S-runs.** A run is 8–13 one-pound fish laid down bank to bank, with the
+  gap between fish shrinking and the sweep quickening as it goes. Every
+  speed-up brings one, so the river is accelerating while you are in the
+  middle of a chain. Later in the night an eel is planted in the S.
+- Between runs the gaps wander by ±30%.
+- The budget still rules: a run delivers 2–3.5 fish a second, so the water
+  between runs had to get sparser (mean gap 0.90 → 1.02 s in Still Water) to
+  keep the win at about 2:09. Time with nothing near the net went from 0.55 s
+  back up to about 7 s a night. That is the trade: rhythm instead of a drip.
+- Two rounds ago the fairness guard moved eels sideways when fish were close in
+  time, which made scatter. Now an eel simply keeps 0.38 s from its neighbours
+  in time, so nothing is ever moved.
+- **Modes.** Zen is the same night with the eels taken out. Taking them out
+  left holes: late in the night half the stream is eels, and the first version
+  had 6-second stretches of empty river. Now an eel's place is left empty only
+  if the place before it was not.

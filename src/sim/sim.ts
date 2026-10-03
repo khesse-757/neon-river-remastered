@@ -32,6 +32,8 @@ export type SimEvent =
   | { type: 'telegraph'; lane: number; kind: FishKind }
   /** A warned eel will not appear after all (a fairness guard turned it into a fish). */
   | { type: 'telegraphCancel' }
+  /** The first fish of an S-run has spawned. */
+  | { type: 'run'; fish: number }
   | { type: 'spawn'; fish: Fish }
   | { type: 'catch'; fish: Fish; weight: number; streak: number; caught: number }
   | { type: 'miss'; fish: Fish; weight: number; escaped: number }
@@ -56,12 +58,35 @@ export interface EmitterState {
   burstPending: boolean;
   spawnTimer: number;
   /** The next two spawns are rolled ahead so an eel can be announced a full lead early. */
-  next: FishKind;
-  afterNext: FishKind;
+  next: Slot;
+  afterNext: Slot;
+  /** Seconds between the next spawn and the one after it. */
+  gap: number;
+  /** S-run, as rolled: fish still to roll in the current run, its size, and one waiting to start. */
+  runLeft: number;
+  runSize: number;
+  runQueued: number;
+  /** Seconds until the next recurring run is queued. */
+  runIn: number;
+  /** S-run, as spawned: the emitter is sweeping a run, and how far through it is (0..1). */
+  inRun: boolean;
+  runK: number;
   telegraphed: boolean;
   afterTelegraphed: boolean;
   /** Spawns rolled since the last eel. */
   sinceEel: number;
+  /** The last place rolled was left empty (a mode without eels). */
+  lastEmpty: boolean;
+}
+
+/** One place in the stream, decided ahead of time. */
+export interface Slot {
+  /** Null: an eel was rolled in a mode without eels, so nothing spawns here. */
+  kind: FishKind | null;
+  /** Rolled as an eel (whether or not the mode has eels): its neighbours keep their distance in time. */
+  eel: boolean;
+  /** Progress 0..1 through an S-run, or null outside one. */
+  run: number | null;
 }
 
 export type RunStatus = 'playing' | 'won' | 'lost';
@@ -145,11 +170,19 @@ export class Sim {
         burstPending: false,
         // With `empty`, the first fish comes one period in instead of at once.
         spawnTimer: options.empty ? stage.period / this.config.tune.density : 0,
-        next: 'bluegill',
-        afterNext: 'bluegill',
+        next: { kind: 'bluegill', eel: false, run: null },
+        afterNext: { kind: 'bluegill', eel: false, run: null },
+        gap: stage.period,
+        runLeft: 0,
+        runSize: 0,
+        runQueued: 0,
+        runIn: 0,
+        inRun: false,
+        runK: 0,
         telegraphed: false,
         afterTelegraphed: false,
         sinceEel: 0,
+        lastEmpty: false,
       },
       net: createNet(),
       fish: [],
@@ -162,8 +195,11 @@ export class Sim {
     };
     this.startSwing(right ? 1 : -1);
     const e = this.state.emitter;
-    e.next = this.rollKind();
-    e.afterNext = this.rollKind();
+    // The first run of the night comes a little sooner than the ones after it.
+    e.runIn = this.range(stage.run.every) * 0.6;
+    e.next = this.rollSlot();
+    e.afterNext = this.rollSlot();
+    e.gap = this.rollGap(e.next, e.afterNext);
     if (!options.empty) {
       // A night opens mid-flow: the river has already been running, so the first fish is close.
       for (let t = 0; t < this.config.prefillSeconds; t += WARM_STEP) {
@@ -234,23 +270,70 @@ export class Sim {
       s.stageIndex += 1;
       s.stage = stages[s.stageIndex] as StageSpec;
       this.events.push({ type: 'stage', stage: s.stage, index: s.stageIndex });
+      // Every speed-up brings an S-run: the current picks up while the player is catching it.
+      s.emitter.runQueued = this.runSize();
+      s.emitter.runIn = this.range(s.stage.run.every);
     }
     const target = s.stage.speed * tune.speed;
     s.speed += (target - s.speed) * (1 - Math.exp(-dt / speedEase));
   }
 
-  private rollKind(): FishKind {
+  private range(pair: readonly [number, number]): number {
+    return pair[0] + (pair[1] - pair[0]) * this.rng.next();
+  }
+
+  private runSize(): number {
+    const [min, max] = this.state.stage.run.fish;
+    return min + Math.floor(this.rng.next() * (max - min + 1));
+  }
+
+  /** Decide the next place in the stream: part of an S-run if one is under way or waiting, else the stage's mix. */
+  private rollSlot(): Slot {
     const { stage, emitter } = this.state;
+    const { tune } = this.config;
+    if (emitter.runLeft === 0 && emitter.runQueued > 0) {
+      emitter.runLeft = emitter.runSize = emitter.runQueued;
+      emitter.runQueued = 0;
+    }
+    if (emitter.runLeft > 0) {
+      const index = emitter.runSize - emitter.runLeft;
+      emitter.runLeft -= 1;
+      // An S-run is 1-lb fish; later in the night an eel is planted in it to steer around.
+      const roll = this.rng.next() < Math.min(0.9, stage.run.eelChance * tune.eel);
+      const eel = roll && !this.warming && index >= 2 && emitter.runLeft > 0 && emitter.sinceEel >= 3;
+      emitter.sinceEel = eel ? 0 : emitter.sinceEel + 1;
+      return { ...this.place(eel, 'bluegill'), run: index / Math.max(1, emitter.runSize - 1) };
+    }
     // Koi is rolled first, then eel, like the original's power-up / bad-fish order.
     const koi = this.rng.next() < stage.koiChance;
-    const eel = this.rng.next() < Math.min(0.9, stage.eelChance * this.config.tune.eel);
+    const roll = this.rng.next() < Math.min(0.9, stage.eelChance * tune.eel);
     // Eels keep their distance from each other: "rare and well spaced" in Still Water.
-    if (!koi && eel && !this.warming && emitter.sinceEel >= stage.eelSpacing) {
-      emitter.sinceEel = 0;
-      return 'eel';
-    }
-    emitter.sinceEel += 1;
-    return koi ? 'koi' : 'bluegill';
+    const eel = !koi && roll && !this.warming && emitter.sinceEel >= stage.eelSpacing;
+    emitter.sinceEel = eel ? 0 : emitter.sinceEel + 1;
+    return { ...this.place(eel, koi ? 'koi' : 'bluegill'), run: null };
+  }
+
+  /**
+   * What goes in a place. In a mode without eels, an eel's place is left empty, but never two in a
+   * row: the second becomes a fish, so the river is never bare for long.
+   */
+  private place(eel: boolean, otherwise: FishKind): { kind: FishKind | null; eel: boolean } {
+    const { emitter } = this.state;
+    const empty = eel && !this.config.eels && !emitter.lastEmpty;
+    emitter.lastEmpty = empty;
+    if (eel && this.config.eels) return { kind: 'eel', eel: true };
+    return empty ? { kind: null, eel: true } : { kind: eel ? 'bluegill' : otherwise, eel: false };
+  }
+
+  /** Seconds between two consecutive places in the stream. Never even: a run tightens, the rest wanders. */
+  private rollGap(from: Slot, to: Slot): number {
+    const { stage } = this.state;
+    const { tune, spacing, fairness } = this.config;
+    const wander = this.range(spacing);
+    const [first, last] = stage.run.period;
+    const gap = (to.run !== null ? first + (last - first) * to.run : stage.period * wander) / tune.density;
+    // An eel keeps clear of its neighbours in time, so nothing has to be moved sideways to be fair.
+    return from.eel || to.eel ? Math.max(gap, fairness.eelWindow + 0.03) : gap;
   }
 
   /** Begin an eased swing from the emitter's lane toward one bank. */
@@ -261,17 +344,21 @@ export class Sim {
     // Already at that bank (after a reversal near it): go the other way.
     if (Math.abs((d > 0 ? hi : lo) - emitter.lane) < MIN_SWING) d = d > 0 ? -1 : 1;
     const full = Math.abs((d > 0 ? hi : lo) - emitter.lane);
-    const share = emitter.burstPending ? 1 : stage.swingMin + (1 - stage.swingMin) * this.rng.next();
+    // An S-run is always bank to bank and never turns back early.
+    const straight = emitter.burstPending || emitter.inRun;
+    const share = straight ? 1 : stage.swingMin + (1 - stage.swingMin) * this.rng.next();
     const distance = Math.min(full, Math.max(MIN_SWING, full * share));
     emitter.from = emitter.lane;
     emitter.to = emitter.lane + d * distance;
     emitter.elapsed = 0;
     // Swings share one peak speed, so a short swing is a quick one.
-    emitter.duration = Math.max(0.4, (stage.crossing * distance) / (hi - lo));
+    // A run sweeps at its own pace, quickening as it goes.
+    const crossing = emitter.inRun ? stage.run.crossing * (1 - 0.3 * emitter.runK) : stage.crossing;
+    emitter.duration = Math.max(0.4, (crossing * distance) / (hi - lo));
     const turn = this.rng.next();
     const at = this.rng.next();
     emitter.reverseAt =
-      !emitter.burstPending && turn < 1 - Math.exp(-stage.reversals * emitter.duration) ? emitter.duration * (0.3 + 0.4 * at) : Infinity;
+      !straight && turn < 1 - Math.exp(-stage.reversals * emitter.duration) ? emitter.duration * (0.3 + 0.4 * at) : Infinity;
   }
 
   /** Move the emitter along its pattern for this stage. */
@@ -290,6 +377,10 @@ export class Sim {
     if (t < 1) return;
     const [lo, hi] = this.config.banks;
     const atBank = Math.min(Math.abs(emitter.lane - lo), Math.abs(emitter.lane - hi)) < 0.01;
+    if (emitter.inRun) {
+      this.startSwing(dir > 0 ? -1 : 1);
+      return;
+    }
     if (stage.bursts && (emitter.burstPending || this.rng.next() < stage.bursts.share)) {
       if (atBank) {
         // Bank to Bank: a burst here, then straight across for another.
@@ -326,31 +417,63 @@ export class Sim {
   }
 
   private stepEmitter(dt: number): void {
-    const { emitter } = this.state;
-    const pace = this.pace();
+    const { emitter, stage } = this.state;
     this.clock += dt;
+    // Runs recur through the stage, on top of the one each speed-up brings.
+    emitter.runIn -= dt;
+    if (emitter.runIn <= 0) {
+      emitter.runIn = this.range(stage.run.every);
+      if (emitter.runLeft === 0 && emitter.runQueued === 0) emitter.runQueued = this.runSize();
+    }
     this.moveEmitter(dt);
 
     emitter.spawnTimer -= dt;
     const lead = this.config.telegraphLead;
-    if (!emitter.telegraphed && emitter.next === 'eel' && emitter.spawnTimer <= lead) {
+    if (!emitter.telegraphed && emitter.next.kind === 'eel' && emitter.spawnTimer <= lead) {
       emitter.telegraphed = true;
       this.events.push({ type: 'telegraph', lane: emitter.lane, kind: 'eel' });
     }
     // When fish come faster than the lead time, the eel after next is announced too.
-    if (!emitter.afterTelegraphed && emitter.afterNext === 'eel' && emitter.spawnTimer + pace.period <= lead) {
+    if (!emitter.afterTelegraphed && emitter.afterNext.kind === 'eel' && emitter.spawnTimer + emitter.gap <= lead) {
       emitter.afterTelegraphed = true;
       this.events.push({ type: 'telegraph', lane: emitter.lane, kind: 'eel' });
     }
     if (emitter.spawnTimer <= 0) {
+      const slot = emitter.next;
+      if (slot.run !== null && !emitter.inRun) {
+        // The run starts here. A burst is dropped and the sweep leaves its bank; a swing already
+        // under way simply carries on (no kink in the chain) and no longer turns back early.
+        const wasPinned = emitter.pinFish > 0;
+        emitter.inRun = true;
+        emitter.runK = 0;
+        emitter.pinFish = 0;
+        emitter.pinBursts = 0;
+        emitter.burstPending = false;
+        emitter.reverseAt = Infinity;
+        if (wasPinned) this.startSwing(1);
+        this.events.push({ type: 'run', fish: emitter.runSize });
+      } else if (slot.run === null) emitter.inRun = false;
+      emitter.runK = slot.run ?? 0;
       const pinned = emitter.pinFish > 0;
-      this.spawn(emitter.next, emitter.lane, pinned);
-      emitter.spawnTimer += pace.period;
+      if (slot.kind !== null) this.spawn(slot.kind, emitter.lane, pinned);
+      emitter.spawnTimer += emitter.gap;
       emitter.next = emitter.afterNext;
       emitter.telegraphed = emitter.afterTelegraphed;
-      emitter.afterNext = this.rollKind();
+      emitter.afterNext = this.rollSlot();
+      emitter.gap = this.rollGap(emitter.next, emitter.afterNext);
       emitter.afterTelegraphed = false;
       if (pinned) this.afterPinnedSpawn();
+      // The run's last fish is out: the sweep settles back to the stage's own pace at its next turn.
+      if (slot.run !== null && emitter.next.run === null) {
+        emitter.inRun = false;
+        // The swing under way slows to the stage's pace from where it is, so the next fish is not
+        // left a long way from the run's last one.
+        const slow = stage.crossing / (stage.run.crossing * (1 - 0.3 * emitter.runK));
+        if (slow > 1) {
+          emitter.duration *= slow;
+          emitter.elapsed *= slow;
+        }
+      }
     }
   }
 

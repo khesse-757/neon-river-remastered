@@ -10,6 +10,7 @@ import { SceneRenderer, type ActorResolution, type FrameView, type WaterLight } 
 import { oracleIntent } from '../sim/bots/oracle';
 import { trackerIntent } from '../sim/bots/tracker';
 import { DEFAULT_CONFIG, STAGES, type FishKind, type SimConfig } from '../sim/config';
+import { configFor, MODES, modeById, type GameMode } from '../sim/modes';
 import type { NetIntent } from '../sim/net';
 import { River, type RiverData } from '../sim/river';
 import { createRng, type Rng } from '../sim/rng';
@@ -31,6 +32,7 @@ const DEFAULT_GRID: readonly [number, number] = [216, 387];
 /** The win sequence: a slow-motion beat, then the celebration, then the results card. */
 const WIN_SECONDS = 6;
 const UNLOCK_STORE = 'neonriver2_hard_river';
+const MODE_STORE = 'neonriver2_mode';
 const PAPER_LANTERN = ['.###.', '#####', '#.#.#', '#####', '#.#.#', '#####', '.###.', '..#..'];
 const GEAR = ['...#.#...', '.#.###.#.', '..#####..', '###...###', '.##...##.', '###...###', '..#####..', '.#.###.#.', '...#.#...'];
 const SPEAKER = ['...#.....', '..##..#..', '####...#.', '####.#.#.', '####...#.', '..##..#..', '...#.....'];
@@ -83,6 +85,8 @@ export interface GameOptions {
   readonly actors?: string | null;
   /** Leitmotif candidate id (from the ?audition page). */
   readonly theme?: string | null;
+  /** Game mode id (?mode=zen); otherwise the saved choice. */
+  readonly mode?: string | null;
   readonly forceByteRipples?: boolean;
   readonly seed?: number;
 }
@@ -90,6 +94,8 @@ export interface GameOptions {
 export class Game {
   river = new River(RIVER);
   config: SimConfig = DEFAULT_CONFIG;
+  /** How the night is played (Normal, Zen, ...): chosen on the title screen. */
+  gameMode: GameMode = modeById(null);
   mode: Mode = 'loading';
   /** Dev overlays read these. */
   sim!: Sim;
@@ -163,6 +169,15 @@ export class Game {
     this.seed = options.seed ?? 1;
     const grid = GRIDS.find(([w, h]) => `${w}x${h}` === options.grid) ?? DEFAULT_GRID;
     this.gridScale = grid[0] / 768;
+    let savedMode: string | null = null;
+    try {
+      savedMode = localStorage.getItem(MODE_STORE);
+    } catch {
+      /* storage unavailable */
+    }
+    // A valid ?mode= wins for this visit without changing the saved choice.
+    this.gameMode = modeById(MODES.some((m) => m.id === options.mode) ? options.mode : savedMode);
+    this.config = this.gameMode.apply(DEFAULT_CONFIG);
     this.audio = new AudioBus(options.theme);
     this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     this.reduceFlashing = this.reducedMotion;
@@ -170,6 +185,7 @@ export class Game {
       start: () => this.confirm(),
       resume: () => this.closePanel(),
       home: () => this.goHome(),
+      mode: () => this.setGameMode((MODES[(MODES.indexOf(this.gameMode) + 1) % MODES.length] as GameMode).id),
       retry: () => this.confirm(),
       settings: () => this.toggleSettings(),
       mute: () => {
@@ -180,6 +196,7 @@ export class Game {
       },
     });
     this.overlay.setMuted(this.audio.isMuted);
+    this.overlay.setGameMode(this.gameMode.name);
     this.panel = new SettingsPanel(this.audio);
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config });
     this.installTestHooks();
@@ -203,6 +220,22 @@ export class Game {
   applyRiver(data: RiverData): void {
     this.river = new River(data);
     this.startRun();
+  }
+
+  /** Choose how the next night is played, and remember it. Only from the title screen. */
+  setGameMode(id: string): void {
+    if (this.mode !== 'title' && this.mode !== 'loading') return;
+    this.gameMode = modeById(id);
+    // The mode reshapes the base tuning; live dev tweaks (tune panel, net feel) carry over.
+    this.config = { ...configFor(this.gameMode.id), tune: this.config.tune, net: this.config.net };
+    this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config });
+    this.overlay.setGameMode(this.gameMode.name);
+    this.audio.uiTick();
+    try {
+      localStorage.setItem(MODE_STORE, this.gameMode.id);
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   /** Dev tune panel: change the pace multipliers of the running night. */
@@ -1173,7 +1206,7 @@ export class Game {
       v.panel(`${id}-strip`, cx - Math.ceil(tw / 2) - 3, y - 2, tw + 6, 11, on ? '#030911' : null, 11);
     };
     // `dx` moves the button's centre off the middle (two buttons side by side).
-    const button = (name: 'start' | 'resume' | 'retry' | 'home', on: boolean, str: string, y: number, dx = 0): void => {
+    const button = (name: 'start' | 'resume' | 'retry' | 'home' | 'mode', on: boolean, str: string, y: number, dx = 0): void => {
       const tw = v.label(`btn-${name}-text`, on ? str : '', cx + dx, y + 6, '#ffd98a', 'center');
       const w = tw + 16;
       const x = cx + dx - Math.ceil(w / 2);
@@ -1192,9 +1225,11 @@ export class Game {
     text('title-sub', title, 'A NIGHT ON THE WATER', at(0.27) + 13, '#99c8cd');
     text('title-rule-1', title, 'CATCH 200 LB', at(0.42), '#c5e1e8');
     text('title-rule-2', title, "DON'T LET 20 LB ESCAPE", at(0.42) + 11, '#c5e1e8');
-    text('title-rule-3', title, 'NEVER NET AN ELECTRIC EEL', at(0.42) + 22, '#c5e1e8');
+    text('title-rule-3', title, this.gameMode.rule, at(0.42) + 22, '#c5e1e8');
     button('start', title, 'TAP TO FISH', at(0.58));
-    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 30, '#99c8cd');
+    // The mode button cycles through the ways to play.
+    button('mode', title, `MODE: ${this.gameMode.name.toUpperCase()}`, at(0.58) + 30);
+    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 60, '#99c8cd');
 
     // Pause and settings are the same panel; on the title the gear opens it without a run.
     const paused = this.mode === 'paused';
@@ -1429,6 +1464,10 @@ export class Game {
       audioLevel: () => this.audio.level(),
       setAudioBeds: (on: boolean) => this.audio.setBeds(on),
       soloAudio: (name: string | null) => this.audio.setSolo(name),
+      setGameMode: (id: string) => {
+        this.setMode('title');
+        this.setGameMode(id);
+      },
       setWeight: (pounds: number) => {
         this.sim.state.caught = pounds;
         this.basketWeight = pounds;
@@ -1448,6 +1487,7 @@ export class Game {
       frame: this.frameCount,
       elapsed: s.time,
       mode: this.mode,
+      gameMode: this.gameMode.id,
       phase: s.stage.id,
       stage: s.stageIndex,
       settings: this.mode === 'paused' || this.settingsOpen,
