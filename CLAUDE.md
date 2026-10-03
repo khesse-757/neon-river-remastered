@@ -149,4 +149,7 @@ reflections, half resolution; not saved).
   viewports plus fps / draw-call stats; `--clip full` records a whole bot-played night to the win,
   `--clip eel` the eel shock and frying basket (run against `npm run preview` for performance numbers).
   Videos are re-encoded to `.mp4` (H.264, plays in QuickTime) when ffmpeg is installed
+- `node scripts/build-brand.mjs` — icons, `public/og.png` and `docs/media/social-preview.png` from the painting and fonts
+- `node scripts/readme-media.mjs [--only shots|hero]` — README hero GIF and screenshots into `docs/media/readme/` (run against
+  `npm run preview`; needs ffmpeg and gifsicle)
 - `node scripts/normalize-audio.mjs` — loudness-normalize `assets-src/audio/*` into `public/audio/` (needs ffmpeg)
