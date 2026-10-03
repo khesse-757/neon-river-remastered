@@ -43,9 +43,15 @@ export class Input {
 
     on('keydown', (e) => {
       this.gesture();
-      // Sliders and other form controls keep their own keys.
-      if (e.target instanceof HTMLInputElement) return;
       if (e.repeat) return;
+      // Sliders keep their own keys, but pause keys still work from one.
+      if (e.target instanceof HTMLInputElement) {
+        if (PAUSE_KEYS.has(e.code)) {
+          this.options.onPause();
+          e.preventDefault();
+        }
+        return;
+      }
       if (LEFT_KEYS.has(e.code) || RIGHT_KEYS.has(e.code)) {
         this.held.add(e.code);
         this.device = 'keys';

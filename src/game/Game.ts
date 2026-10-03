@@ -28,13 +28,16 @@ const DEFAULT_GRID: readonly [number, number] = [216, 387];
 
 const VOLUME_KEYS = ['music', 'ambience', 'sfx'] as const;
 const SCOOP_TIME = 0.34;
+/** Progress at which the emitter's lane is shown: the first place the river is wide enough to read it. */
+const EMITTER_READ = 0.24;
 const TOSS_TIME = 0.5;
 
 const C = {
   eel: color('#39e6ee'),
   eelHot: color('#8ff8ff'),
   koi: color('#ffb347'),
-  shimmer: color('#5f93b8'),
+  shimmer: color('#9fd8e8'),
+  wake: color('#bfe6f0'),
   white: color('#ffffff'),
   droplet: color('#9ccbcf'),
   firefly: color('#ffd98a'),
@@ -308,9 +311,9 @@ export class Game {
         const p = this.fishPoint(event.fish);
         const koi = event.fish.kind === 'koi';
         this.audio.catch(event.streak, koi);
-        // A second catch mid-lift keeps the lift going instead of snapping it back down.
+        // Mirror onto the rising half at the same height, so the lift never jumps.
         if (this.scoop === 0) this.scoop = 0.0001;
-        else if (this.scoop > SCOOP_TIME * 0.6) this.scoop = SCOOP_TIME * 0.35;
+        else if (this.scoop > SCOOP_TIME / 2) this.scoop = SCOOP_TIME - this.scoop;
         this.bulge = 1;
         this.drip = 0.9;
         ripples.inject(p.x, p.y, koi ? 5 : 4, koi ? 0.9 : 0.7);
@@ -455,6 +458,16 @@ export class Game {
       if (fish.status === 'swimming' && this.time - last > 0.12) {
         this.wake.set(fish.id, this.time);
         ripples.inject(p.x, p.y - 2 * rel, 1 + 1.6 * rel, 0.16 + 0.12 * rel);
+        // Far up the river the fish is a few pixels; a short bright wake line carries the read.
+        if (fish.progress < 0.6)
+          particles.emit({
+            x: p.x,
+            y: p.y,
+            life: 0.7,
+            color: fish.kind === 'eel' ? C.eel : fish.kind === 'koi' ? C.koi : C.wake,
+            size: 1.1 + 1.4 * rel,
+            glow: fish.kind === 'bluegill' ? 0.85 : 1.3,
+          });
       }
       if (fish.kind === 'eel' && fish.status === 'swimming' && rel > 0.2 && this.fx.next() < dt * (fish.firstEel ? 26 : 14)) {
         // Arcs crawl along the body.
@@ -608,15 +621,16 @@ export class Game {
       });
     }
 
-    // The emitter's lane shimmers at the far bend; an incoming eel glows cold blue there.
+    // The emitter's lane is marked twice: at the far bend, and again a little downstream where the
+    // river is wide enough for the lane to be read. An incoming eel turns both cold blue and bigger.
     if (this.mode === 'playing' && !state.resting) {
-      const e = river.pointAt(0.05, state.emitter.lane);
-      waterLights.push({ x: e.x, z: e.z, radius: 0.6, intensity: 0.42 + 0.14 * Math.sin(this.time * 9), color: C.shimmer });
-    }
-    if (this.telegraph) {
-      const e = river.pointAt(0.05, state.emitter.lane);
-      const grow = Math.min(1, this.telegraph.age / this.config.telegraphLead);
-      waterLights.push({ x: e.x, z: e.z, radius: 0.6 + 0.5 * grow, intensity: 0.6 + 0.6 * grow, color: C.eel });
+      const pulse = 0.5 + 0.5 * Math.sin(this.time * 9);
+      const far = river.pointAt(0.05, state.emitter.lane);
+      const read = river.pointAt(river.progressToS(EMITTER_READ), state.emitter.lane);
+      const grow = this.telegraph ? Math.min(1, this.telegraph.age / this.config.telegraphLead) : 0;
+      const tint = this.telegraph ? C.eel : C.shimmer;
+      waterLights.push({ x: far.x, z: far.z, radius: 0.6 + 0.5 * grow, intensity: 0.5 + 0.2 * pulse + 0.6 * grow, color: tint });
+      waterLights.push({ x: read.x, z: read.z, radius: 0.2 + 0.12 * grow, intensity: 0.55 + 0.25 * pulse + 0.5 * grow, color: tint });
     }
 
     // Eel shock: a white-blue flash, then the river goes dark and the neon dies.
@@ -822,8 +836,11 @@ export class Game {
         this.sim.step(STEP, opts.idle ? { kind: 'none' } : trackerIntent(this.sim.state, this.config.net.radius));
         for (const e of this.sim.drainEvents())
           if (e.type === 'restStart' || e.type === 'phaseStart' || e.type === 'lose' || e.type === 'win') this.onEvent(e);
-          else if (e.type === 'catch') this.basketWeight += e.weight;
       }
+      // Everything caught so far has landed, except fish still in the net (they add when they land).
+      this.basketWeight = this.sim.state.fish
+        .filter((f) => f.status === 'scooped')
+        .reduce((w, f) => w - this.config.weights[f.kind], this.sim.state.caught);
       // The last stretch runs through the full frame path so wakes, ripples and particles exist.
       for (let t = 0; t < warm && this.mode === 'playing'; t += STEP) this.frame(STEP);
       this.autoplay = false;
@@ -915,7 +932,7 @@ export class Game {
       streak: s.streak,
       fish: s.fish.length,
       net: { lane: s.net.lane, velocity: s.net.velocity },
-      actors: this.view.pixelsPerTexel === layout.scale ? 'device' : '3x',
+      actors: this.view.pixelsPerTexel === layout.scale ? 'device' : 'capped',
       basket: this.basketWeight,
       audioErrors: this.audio.errors.length,
       renderer: {

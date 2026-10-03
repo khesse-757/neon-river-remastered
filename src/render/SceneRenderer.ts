@@ -444,7 +444,7 @@ export class SceneRenderer {
       if (e) light.position.set(e.x, 0.03, -e.z);
     });
 
-    this.lantern.update(view.time, view.lantern);
+    this.lantern.update(view.time, view.lantern, view.darken);
     this.lanternLight.position.copy(this.lantern.flame);
     this.lanternLight.intensity = 0.045 * view.lantern * (1 - view.darken);
     const flame = this.toTexel(this.lantern.flame);

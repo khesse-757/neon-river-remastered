@@ -205,10 +205,10 @@ export class LanternProp {
     this.root.traverse((o) => o.layers.set(layer));
   }
 
-  update(time: number, flicker: number): void {
+  update(time: number, flicker: number, dim = 0): void {
     this.hanger.rotation.z = Math.sin(time * 1.3) * 0.11;
     this.hanger.rotation.x = Math.sin(time * 0.9 + 1.2) * 0.06;
-    this.paper.emissiveIntensity = 1.15 + flicker * 0.5;
+    this.paper.emissiveIntensity = (1.15 + flicker * 0.5) * (1 - dim * 0.8);
     this.root.updateMatrixWorld(true);
     this.flame.set(0, -1.25 * this.size, 0).applyMatrix4(this.hanger.matrixWorld);
   }
@@ -287,7 +287,7 @@ export class BasketProp {
       // Deterministic pile: rings that climb and tighten, each fish lying at its own angle.
       const layerIndex = Math.floor(i / 6);
       const a = i * 2.39996;
-      const r = size * (0.5 - layerIndex * 0.06) * (i % 6 === 0 ? 0.25 : 1);
+      const r = size * (0.4 - layerIndex * 0.05) * (i % 6 === 0 ? 0.25 : 1);
       q.setFromEuler(new THREE.Euler(Math.sin(i * 1.7) * 0.5, a * 1.3, Math.cos(i * 2.3) * 0.5));
       m.compose(
         new THREE.Vector3(Math.cos(a) * r, size * (0.14 + layerIndex * 0.19), Math.sin(a) * r),

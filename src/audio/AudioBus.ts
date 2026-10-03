@@ -134,7 +134,7 @@ export class AudioBus {
     this.save();
   }
 
-  /** Suspend with the game so nothing keeps sounding (or stacking) while paused or hidden. */
+  /** Suspend while the tab is hidden so nothing keeps sounding or stacking. */
   setPaused(paused: boolean): void {
     if (!this.ctx) return;
     if (paused && this.ctx.state === 'running') void this.ctx.suspend();
