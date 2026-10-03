@@ -1,6 +1,6 @@
 # CLAUDE.md — Neon River (Remaster)
 
-A pixel-art arcade fishing game inspired by the Jak and Daxter fishing
+A pixel-art-world arcade fishing game with stylized 3D actors, inspired by the Jak and Daxter fishing
 minigame, rebuilt on three.js. Catch 200 lb, let no more than 20 lb escape,
 never net an electric eel. Plays on phones (portrait) and desktop browsers.
 
@@ -9,8 +9,8 @@ never net an electric eel. Plays on phones (portrait) and desktop browsers.
 1. `docs/design/REMASTER_BRIEF.md` — what we're building and why (source of truth)
 2. `docs/design/ORIGINAL_FISHING_DESIGN.md` — how the original minigame's fish
    patterns and pacing work
-3. `.claude/skills/neon-river-art-direction/SKILL.md` — pixel-art rules that
-   override the threejs-* skills wherever they conflict
+3. `.claude/skills/neon-river-art-direction/SKILL.md` — art direction v2 (painted
+   pixel world + toon-lit 3D actors); overrides the threejs-* skills where they conflict
 4. `artifacts/game-progress.md` — current state, decisions, next actions
 5. `reference/original/` — Neon River v1 (Canvas 2D). Read-only reference.
    Port ideas and sprite data from it; never import from it.
@@ -77,6 +77,7 @@ say what ran.
 - Run the game yourself: start the dev server in the background, drive it with
   the test hooks / canvas inspector or the Playwright MCP browser, and look at
   the screenshots. Stop servers you start.
+- Never use broad `pkill`/`killall`; stop only the PIDs you started.
 - `.claude/loop.md` is the default `/loop` prompt (CI babysitting + next action).
 
 ## Journaling for the blog

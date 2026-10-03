@@ -10,9 +10,12 @@ run, and the fish move in readable, escalating patterns that reward mastery.
 
 ## 1. What must not change (the concept)
 
-- **Pixel art.** 16-bit-era look. Every pixel on screen lands on one shared
-  pixel grid. No smooth/bilinear scaling, no PBR-glossy 3D, no "HD remaster"
-  look. Three.js is the renderer, not the art style.
+- **Pixel-art painting as the world, stylized toon-lit 3D actors.** The painted
+  night is drawn crisp (nearest filtering, whole multiples of its native pitch).
+  The things you play with — water, fish, eels, net, lantern, basket — are
+  crafted, toon-lit 3D objects living inside it, lit by its moon, lantern and
+  neon. HD-2D, flipped. No photoreal glossy PBR. Three.js is the renderer; the
+  painting is still the identity.
 - **The painting.** `background.png` and `fisherman.png` are the scene. The
   composition (portrait, river winding from the neon city to the stone bridge,
   fisherman bottom-right in his straw hat) stays. We animate and light it; we do
@@ -135,44 +138,46 @@ cumulative for near-perfect play.) Verify with the oracle bot and retune.
 - Fisherman speech bubbles (pixel font, original lines, rate-limited like the
   original): big fish spotted, steady, slipping, almost there, win, loss.
 
-## 4. Visual direction — "the painting comes alive"
+## 4. Visual direction — "the painting, in 3D" (art direction v2)
 
-See `.claude/skills/neon-river-art-direction/SKILL.md` for the rules. Features:
+`.claude/skills/neon-river-art-direction/SKILL.md` (v2) is the rulebook. v1 of
+this section locked everything to one 216×387 pixel grid with flat sprites; Kyle
+found that faithful but too flat and low-res. v2:
 
-1. **One pixel grid.** Render the scene into a low-res target (start ≈256×459,
-   evaluate 192×344 and 384×688 in look-dev) and upscale with nearest filtering.
-   Re-quantize the background onto that grid so painting, sprites, and VFX
-   share one pixel density.
-2. **Curated palette.** Extract ~32–48 colors from the painting; final pass
-   quantizes with ordered (Bayer) dithering so new light, rain, and glow all
-   stay in-palette.
-3. **Living water** inside a water mask: flow-aligned scrolling ripples, moonlit
-   glints, distorted reflections of the neon skyline, fish **under** the surface
-   (refraction wobble + depth tint), a GPU ripple height-field that fish, net,
-   rain and splashes disturb, wakes behind fish.
-4. **Animated painting** via masks: reeds and cattails sway, tree canopies
-   breathe, neon signs flicker, stars twinkle, clouds drift past the moon.
-5. **Light:** the paper lantern flickers and lights the bridge and nearby water;
-   eels emit a cold electric light on the water; koi have a warm gleam; lightning
-   back-lights the skyline in the storm.
-6. **Particles:** fireflies, rain streaks + rain rings, splash droplets, sparks,
-   floating paper lanterns on win — all pixel-snapped.
-7. **Fish:** pixel sprites with 4–6 frame swim cycles plus turn and flail frames,
-   authored at 2–3 sizes (far/mid/near) and swapped by projected size so pixels
-   never resample. Look-dev also tries voxel-extruded versions of the same
-   sprites; pick by screenshot.
-8. **Fisherman:** idle breathing, hat tilting toward the net, reactions (nod,
-   jolt, slump, triumphant lift) done by deforming the existing sprite.
-9. **The night is the progress bar:** phases change weather and light (table
-   §3.3). The player feels the ramp before reading the HUD.
-10. **Wide screens:** the portrait scene stays the playfield; side gutters show
-    a calm extension of the night (stars, distant silhouettes, fireflies,
-    vignette) and can host HUD. (Optional, needs Kyle's approval: a Gemini
-    outpaint of the painting to 16:9.)
+1. **Two layers.** The painting is the world: crisp, nearest-filtered, at an
+   integer multiple of its native pitch (≈216×387), split by masks into depth
+   layers (sky/city, hills and banks, reeds, bridge) that shift slightly for
+   parallax. Actors and water render at high resolution on top (A/B device
+   resolution against a 3×-pitch target; pick by phone screenshot).
+2. **The river is a real surface** fitted to the water mask and spline: flow
+   normals, Fresnel, stepped moon glints, reflections of the skyline and neon,
+   refraction of the painted bed, depth absorption, bank foam, the GPU ripple
+   height-field, wakes.
+3. **Fish and eels are procedural toon-lit 3D** (built in code, no external 3D
+   generation): spine-wave swim, fins, koi gleam, eel bioluminescence and arcs.
+   They sit under the water with continuous depth fog and rise smoothly toward
+   the surface near the net. They never pop, and never outshine the water's
+   brightest glints unless caught.
+4. **The net is a 3D hero prop:** lacquered bamboo pole, glowing cyber hinge,
+   hoop, cloth net that sags, bulges and drips; a scoop-and-lift catch tipped
+   into a woven **basket that fills toward 200 lb** (diegetic progress).
+5. **Light from places you can see:** cool moon key, warm swinging paper
+   lantern, cyan eel lights, magenta/teal neon fill, lightning in the storm.
+   The painted fisherman stays, lit with a normal map derived from his sprite.
+6. **Post (≤ 2 passes on mobile):** selective bloom (neon, eels, lantern, koi
+   gleam, fireflies), a palette grade with a strength value (not a hard
+   quantize), vignette.
+7. **VFX:** splashes, ripple rings, wakes, rain, sparks and arcs, fireflies,
+   floating lanterns on win, the neon blackout on an eel loss. Pooled.
+8. **The night is the progress bar:** phases change weather and light (§3.3).
+9. **UI stays pixel art** (crisp pixel font on authored panels). That contrast
+   with the 3D actors is intended.
+10. **Wide screens:** the portrait scene stays the playfield; gutters extend the
+    night.
 
 Accessibility: reduced-motion (no shake, no parallax), reduce-flashing
 (lightning ≤ 1 flash/s, softened), eels distinguished by silhouette, motion,
-sparks, and sound — never color alone.
+light and sound — never color alone.
 
 ## 5. UI
 
@@ -215,15 +220,16 @@ sparks, and sound — never color alone.
   `loss-escaped`, `pause`, `settings`.
 - Keep v1 quality tooling: ESLint, Prettier, Husky pre-commit, GitHub Actions
   CI (lint, typecheck, unit tests, build) and Pages deploy.
-- Budgets: 60 fps on a mid-range phone; ≤ 60 draw calls; one composite post
-  pass plus the upscale blit; initial download ≤ 3 MB before audio
-  (the re-quantized painting is far smaller than v1's 2.2 MB PNG).
+- Budgets (v2): 60 fps on a mid-range phone; ≤ 100 draw calls mobile / 200
+  desktop; ≤ 2 post passes on mobile; initial download ≤ 4 MB before audio.
 - Optional: web app manifest (portrait, fullscreen) for add-to-home-screen.
 
 ## 8. Non-goals for this release
 
-New enemy types, story mode, online leaderboards, 3D-generated models,
-landscape-only redesign, monetization, CRT/scanline filters by default.
+New enemy types, story mode, online leaderboards, externally generated 3D
+models (Tripo etc.), photoreal glossy PBR, landscape-only redesign,
+monetization, CRT/scanline filters by default. Procedural stylized 3D built in
+code is in scope.
 
 ## 9. Proof of done
 
