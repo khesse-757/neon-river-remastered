@@ -10,7 +10,15 @@ import {
   type EqPreset,
 } from '../audio/settings';
 import { textCanvas } from '../render/PixelText';
-import { HUD_SCALES, LOOKS, QUALITY_PRESETS, RESOLUTION_STEPS, type VisualSettings, type VisualStore } from '../render/visuals';
+import {
+  HUD_SCALES,
+  LOOKS,
+  QUALITY_PRESETS,
+  RESOLUTION_STEPS,
+  WEATHER_CHOICES,
+  type VisualSettings,
+  type VisualStore,
+} from '../render/visuals';
 
 /** Width of the panel in texels. Fits a 320 px phone at one CSS pixel per texel. */
 export const PANEL_WIDTH = 208;
@@ -333,7 +341,38 @@ export class SettingsPanel {
         toggle: { name: 'Bloom', get: () => store.settings.bloom, set: (on) => store.update({ bloom: on }) },
       },
       flag('reflections', 'WATER REFLECTIONS'),
-      flag('weather', 'WEATHER'),
+      { kind: 'heading', text: 'WEATHER' },
+      {
+        kind: 'choice',
+        id: 'vis-weather',
+        label: 'WEATHER',
+        options: ['BY MODE', 'ALWAYS RAIN', 'ALWAYS STORM', 'OFF'],
+        get: () => WEATHER_CHOICES.indexOf(store.settings.weather),
+        set: (i) => store.update({ weather: WEATHER_CHOICES[i] ?? 'auto' }),
+      },
+      {
+        kind: 'slider',
+        id: 'vis-rain',
+        label: 'RAIN',
+        min: 0,
+        max: 150,
+        step: 10,
+        get: () => Math.round(store.settings.rainAmount * 100),
+        set: (v) => store.update({ rainAmount: v / 100 }),
+        text: percent,
+      },
+      {
+        kind: 'slider',
+        id: 'vis-lightning',
+        label: 'LIGHTNING',
+        min: 0,
+        max: 100,
+        step: 10,
+        get: () => Math.round(store.settings.lightning * 100),
+        set: (v) => store.update({ lightning: v / 100 }),
+        text: percent,
+      },
+      { kind: 'heading', text: 'EFFECTS' },
       {
         kind: 'slider',
         id: 'vis-particles',
@@ -383,6 +422,33 @@ export class SettingsPanel {
       fader('adv-sfx', 'SPLASH + SFX', 'sfx'),
       fader('adv-notes', 'FISH NOTES', 'notes'),
       fader('adv-ui', 'UI', 'ui'),
+      {
+        kind: 'slider',
+        id: 'adv-rain',
+        label: 'RAIN',
+        min: 0,
+        max: 100,
+        step: 5,
+        get: () => Math.round(s.rain * 100),
+        set: (v) => audio.update({ rain: v / 100 }),
+        text: percent,
+      },
+      {
+        kind: 'slider',
+        id: 'adv-thunder',
+        label: 'THUNDER',
+        min: 0,
+        max: 100,
+        step: 5,
+        get: () => Math.round(s.thunder * 100),
+        // Each move plays a roll, so the level can be set by ear on a clear night too.
+        set: (v) => {
+          audio.update({ thunder: v / 100 });
+          audio.loadWeather();
+          audio.thunder();
+        },
+        text: percent,
+      },
       { kind: 'heading', text: 'FISH NOTES' },
       {
         kind: 'choice',

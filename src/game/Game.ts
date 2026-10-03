@@ -383,6 +383,8 @@ export class Game {
    * the win sequence and the results.
    */
   toggleSettings(): void {
+    // The gear is a gesture too: sound (the rain, if it is raining) starts with it.
+    void this.audio.unlock().then(() => this.audio.startLoops());
     if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
     else if (this.mode === 'paused') this.setMode('playing');
     else if (this.mode !== 'loading') this.settingsOpen = !this.settingsOpen;
@@ -929,13 +931,16 @@ export class Game {
 
   /** Storm Night's weather: steady light rain, rings on the water, and lightning with its thunder. */
   private updateWeather(dt: number): void {
-    const on = this.visuals.settings.weather;
-    const storm = this.gameMode.weather === 'storm' && on;
+    // The Weather setting follows the mode, or puts rain or a storm over everything (title and Zen
+    // included: somewhere to sit and listen), or turns it all off.
+    const choice = this.visuals.settings.weather;
+    const kind = choice === 'auto' ? this.gameMode.weather : choice === 'off' ? 'clear' : choice;
+    const storm = kind === 'storm';
     // Normal tells the night's story: light rain from the second speed-up, heavier in the last
     // stage, clearing as the win is celebrated. Storm Night rains from the title screen on.
     const stage = this.sim.state.stageIndex;
     const story = this.mode === 'title' || this.win > 0 ? 0 : stage >= 3 ? 1.7 : stage >= 2 ? 0.7 : 0;
-    const target = !on ? 0 : storm ? 1 : this.gameMode.weather === 'story' ? story : 0;
+    const target = storm || kind === 'rain' ? 1 : kind === 'story' ? story : 0;
     this.rain += (target - this.rain) * (1 - Math.exp(-dt / 1.8));
     if (this.rain < 0.01 && target === 0) this.rain = 0;
     if (target > 0) this.audio.loadWeather();
@@ -944,7 +949,9 @@ export class Game {
     if (this.rain === 0) return;
     const { particles, ripples, layout } = this.view;
     // Rain: short streaks across the whole screen, gutters included. Reduced motion keeps only the rings.
-    this.rainTimer += dt * (this.reducedMotion ? 0 : 90 * this.rain * this.visuals.settings.particles);
+    // The sound follows the rain itself; the Rain slider only changes how much of it is drawn.
+    const drawn = this.rain * this.visuals.settings.rainAmount;
+    this.rainTimer += dt * (this.reducedMotion ? 0 : 90 * drawn * this.visuals.settings.particles);
     while (this.rainTimer >= 1) {
       this.rainTimer -= 1;
       const x = -layout.originX + this.fx.next() * (layout.targetW + 30);
@@ -954,7 +961,7 @@ export class Game {
       for (let k = 0; k < 6; k++)
         particles.emit({ x: x + k * 0.14, y: y - k * 1.05, vx: -30, vy: 230, life, color: C.rain, size: 1.5, glow: 1 - k * 0.12 });
     }
-    this.ringTimer += dt * 9 * this.rain;
+    this.ringTimer += dt * 9 * drawn;
     while (this.ringTimer >= 1) {
       this.ringTimer -= 1;
       const p = this.gridPoint(0.25 + this.fx.next() * 0.75, this.fx.next());
@@ -975,7 +982,7 @@ export class Game {
     }
     if (this.thunderIn > 0) {
       this.thunderIn -= dt;
-      if (this.thunderIn <= 0 && this.mode === 'playing') this.audio.thunder();
+      if (this.thunderIn <= 0) this.audio.thunder();
     }
   }
 
@@ -983,6 +990,10 @@ export class Game {
   private lightning(): number {
     const t = this.bolt;
     if (t <= 0) return 0;
+    return this.visuals.settings.lightning * this.boltShape(t);
+  }
+
+  private boltShape(t: number): number {
     if (this.reduceFlashing) return 0.12 * Math.sin(Math.PI * Math.min(1, t));
     const flicker = t < 0.07 ? 1 : t < 0.15 ? 0.15 : t < 0.24 ? 0.75 : Math.max(0, 0.75 * (1 - (t - 0.24) / 0.4));
     return 0.5 * flicker;

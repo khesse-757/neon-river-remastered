@@ -66,6 +66,10 @@ export const lookById = (id: string): Look => LOOKS.find((l) => l.id === id) ?? 
 export const RESOLUTION_STEPS: readonly number[] = [0.5, 0.75, 1];
 export const HUD_SCALES: readonly number[] = [1, 2];
 
+/** 'auto': each mode's own weather. 'rain' and 'storm': that weather everywhere, title screen and Zen included. */
+export type WeatherChoice = 'auto' | 'rain' | 'storm' | 'off';
+export const WEATHER_CHOICES: readonly WeatherChoice[] = ['auto', 'rain', 'storm', 'off'];
+
 export interface VisualSettings {
   quality: QualityPreset;
   /** Share of the 3D layer's full resolution: 0.5, 0.75 or 1. */
@@ -74,7 +78,11 @@ export interface VisualSettings {
   /** 0..1.5; 1 is the authored strength. */
   bloomIntensity: number;
   reflections: boolean;
-  weather: boolean;
+  weather: WeatherChoice;
+  /** How much rain is drawn, 0..1.5 (the sound has its own fader). */
+  rainAmount: number;
+  /** How bright lightning is, 0..1. */
+  lightning: number;
   /** Particles and fireflies, 0..1. Fish wakes and warnings are never thinned: they carry the read. */
   particles: number;
   drift: boolean;
@@ -93,7 +101,9 @@ export const defaultVisuals = (system = false): VisualSettings => ({
   bloom: true,
   bloomIntensity: 1,
   reflections: true,
-  weather: true,
+  weather: 'auto',
+  rainAmount: 1,
+  lightning: 1,
   particles: 1,
   drift: true,
   shake: true,
@@ -118,7 +128,11 @@ export function sanitizeVisuals(raw: unknown, system = false): VisualSettings {
   out.bloom = flag(r.bloom, out.bloom);
   out.bloomIntensity = within(r.bloomIntensity, 0, 1.5, out.bloomIntensity);
   out.reflections = flag(r.reflections, out.reflections);
-  out.weather = flag(r.weather, out.weather);
+  // (The first version saved weather as on/off.)
+  if (WEATHER_CHOICES.includes(r.weather as WeatherChoice)) out.weather = r.weather as WeatherChoice;
+  else if (r.weather === false) out.weather = 'off';
+  out.rainAmount = within(r.rainAmount, 0, 1.5, out.rainAmount);
+  out.lightning = within(r.lightning, 0, 1, out.lightning);
   out.particles = within(r.particles, 0, 1, out.particles);
   out.drift = flag(r.drift, out.drift);
   out.shake = flag(r.shake, out.shake);

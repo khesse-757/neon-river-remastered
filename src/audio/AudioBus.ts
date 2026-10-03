@@ -123,6 +123,9 @@ export class AudioBus {
   private readonly loops = new Map<'ambience' | 'music', { source: AudioBufferSourceNode; fade: GainNode }>();
   private readonly rain = new Map<string, { source: AudioBufferSourceNode; gain: GainNode }>();
   private rainLevel = 0;
+  /** Rain and thunder have their own faders into the mix (after them: master, mute, EQ, limiter). */
+  private rainBus: GainNode | null = null;
+  private thunderBus: GainNode | null = null;
   private weatherLoading = false;
   private readonly cue = new Set<AudioScheduledSourceNode>();
   private voices: number[] = [];
@@ -323,6 +326,12 @@ export class AudioBus {
           this.wetFaders.set(route, wet);
         }
       }
+      this.rainBus = ctx.createGain();
+      this.thunderBus = ctx.createGain();
+      this.rainBus.gain.value = 0;
+      this.thunderBus.gain.value = 0;
+      this.rainBus.connect(this.mix);
+      this.thunderBus.connect(this.mix);
       // The music bed passes through a duck gain that dips under stingers and the shock.
       this.duck = ctx.createGain();
       const music = this.buses.get('music');
@@ -662,7 +671,7 @@ export class AudioBus {
 
   private applyRain(): void {
     const { ctx } = this;
-    const bus = this.buses.get('ambience');
+    const bus = this.rainBus;
     if (!ctx || !bus) return;
     const level = this.bedsOn && this.allowed('rain') ? this.rainLevel : 0;
     const want: Record<string, number> = {
@@ -692,10 +701,25 @@ export class AudioBus {
 
   /** Thunder: one of three recorded rolls, or a synthesized rumble until they have loaded. */
   thunder(): void {
-    if (!this.allowed('thunder')) return;
+    // One roll at a time: a dragged fader or two bolts close together do not stack.
+    if (!this.allowed('thunder') || !this.fresh('thunder', 1.2)) return;
     const id = `thunder${1 + Math.floor(this.rng.next() * 3)}`;
-    if (this.buffers.has(id)) this.play(id, 'sfx', 0.55, 0.92 + this.rng.next() * 0.16);
-    else this.noise(2.8, 0.2, 'lowpass', 240, 70, 0.12);
+    const { ctx, thunderBus } = this;
+    const buffer = this.buffers.get(id);
+    if (!ctx || !thunderBus) return;
+    if (!buffer) {
+      this.noise(2.8, 0.2 * this.settings.thunder, 'lowpass', 240, 70, 0.12);
+      return;
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = 0.92 + this.rng.next() * 0.16;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    // Low in the mix: a rumble behind the rain, not a jump scare. The Thunder fader can bring it up.
+    gain.gain.linearRampToValueAtTime(0.32, ctx.currentTime + 0.03);
+    source.connect(gain).connect(thunderBus);
+    source.start();
   }
 
   /** Filtered noise with a swell-and-fade envelope (the rush of a speed-up, the frying basket). */
@@ -769,6 +793,8 @@ export class AudioBus {
       if (bus) set(bus.gain, gain);
       if (wet) set(wet.gain, gain);
     }
+    if (this.rainBus) set(this.rainBus.gain, this.audition ? 0 : TRIM.ambience * s.rain ** 2 * 1.6);
+    if (this.thunderBus) set(this.thunderBus.gain, this.audition ? 0 : TRIM.sfx * s.thunder ** 2 * 1.6);
     set(eq.bass.gain, s.bass);
     set(eq.mid.gain, s.mid);
     set(eq.treble.gain, s.treble);
@@ -851,6 +877,7 @@ export class AudioBus {
     try {
       this.buffers.set(id, await context.decodeAudioData(data));
       if (this.wantLoops && (id === 'ambience' || id === 'music')) this.startLoop(id);
+      if (id.startsWith('rain')) this.applyRain();
     } catch (error) {
       this.errors.push(`${id}: ${String(error)}`);
     }

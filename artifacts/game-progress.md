@@ -92,6 +92,13 @@ Also fixed: the bluegill's dorsal fin is now two faces lit from above on each si
 
 Ran: `npm run check`, Playwright smoke (desktop + mobile), one screenshot each of the fin, the Moonlight koi and Normal's rain. No playtester run (no spawn numbers changed).
 
+### Weather controls (2026-10-03, branch `feat/weather-sliders`, after Kyle asked for sliders)
+
+- **Advanced visuals → Weather:** a choice (BY MODE / ALWAYS RAIN / ALWAYS STORM / OFF) replaces the on/off switch (a saved "off" carries over), plus RAIN (how much is drawn, 0–150%) and LIGHTNING (brightness, 0–100%) sliders. ALWAYS RAIN and ALWAYS STORM apply everywhere, the title screen and Zen included, so the game can be left open just to listen.
+- **Advanced audio → Volume:** RAIN and THUNDER faders, separate from Sounds and Ambience (their own gains into the mix, so Music and Sounds can be off with the rain still playing). Moving the Thunder fader plays a roll.
+- The gear button now also unlocks audio, so rain is heard on the title without starting a night. Thunder plays at 0.32 gain (was 0.55) and never overlaps itself.
+- Measured at the title with Music and Sounds off (RMS at the output): storm with both faders up 0.048 mean; rain only 0.036; thunder only 0.019 mean with 0.33 peaks (before the thunder trim); both faders at zero 0.000; Weather OFF 0.000. Not heard by anyone.
+
 ### Open for Kyle
 
 - Item 2 (does Normal's first 30 s feel too busy?) and item 7 (real-device notes).

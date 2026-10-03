@@ -51,6 +51,15 @@ describe('visual settings', () => {
     expect(v.look).toBe('night');
     expect(v.hudScale).toBe(1);
     expect(v.drift).toBe(false);
+    // The first saved format had weather as a switch.
+    expect(sanitizeVisuals({ weather: false }).weather).toBe('off');
+    expect(sanitizeVisuals({ weather: true }).weather).toBe('auto');
+    expect(sanitizeVisuals({ weather: 'storm', rainAmount: 1.5, lightning: 0 })).toMatchObject({
+      weather: 'storm',
+      rainAmount: 1.5,
+      lightning: 0,
+    });
+    expect(sanitizeVisuals({ rainAmount: 9, lightning: -1 })).toMatchObject({ rainAmount: 1, lightning: 1 });
   });
 
   it('has four looks, with Night as the unchanged picture', () => {
