@@ -28,32 +28,31 @@ test('loads, catches, pauses, loses to an eel and wins', async ({ page }) => {
     buckets.add((((shot.data[i] ?? 0) >> 4) << 8) | (((shot.data[i + 1] ?? 0) >> 4) << 4) | ((shot.data[i + 2] ?? 0) >> 4));
   expect(buckets.size).toBeGreaterThan(24);
 
-  // Start a night. Game time runs 4x; the planning bot keeps the net clear of eels meanwhile.
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setTimeScale(4));
-  await page.locator('#btn-start').click();
-  await expect.poll(() => mode(page)).toBe('playing');
+  // Start a night with the beds off and only the catch sound allowed, so a level at the output
+  // can only be a catch.
   await page.evaluate(() => {
     const hooks = window.__THREE_GAME_TEST_HOOKS__;
-    hooks?.setAutoplay(true);
     hooks?.setAudioBeds(false);
     hooks?.soloAudio('catch');
   });
+  await page.locator('#btn-start').click();
+  await expect.poll(() => mode(page)).toBe('playing');
 
   // One catch, and its sound reaches the output.
   const before = (await diag(page))?.caught ?? 0;
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.spawnAtNet('bluegill'));
-  let heard = 0;
+  await expect.poll(async () => (await diag(page))?.caught ?? 0, { timeout: 8_000, intervals: [40] }).toBeGreaterThan(before);
   await expect
-    .poll(
-      async () => {
-        heard = Math.max(heard, await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.audioLevel() ?? 0));
-        return heard;
-      },
-      { timeout: 8_000, intervals: [40] },
-    )
+    .poll(() => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.audioPeak ?? 0), { timeout: 8_000, intervals: [40] })
     .toBeGreaterThan(AUDIBLE);
-  expect((await diag(page))?.caught ?? 0).toBeGreaterThan(before);
-  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.soloAudio(null));
+
+  // From here game time runs 4x; the planning bot keeps the net clear of eels meanwhile.
+  await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__;
+    hooks?.soloAudio(null);
+    hooks?.setTimeScale(4);
+    hooks?.setAutoplay(true);
+  });
 
   // Space pauses and resumes.
   await page.keyboard.press('Space');
