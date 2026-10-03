@@ -23,14 +23,23 @@ export function rasterizeText(text: string, color: readonly [number, number, num
   const ctx = scratch.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('2D context unavailable for text.');
   ctx.font = font;
-  const width = Math.max(1, Math.ceil(ctx.measureText(text).width));
+  // Headings get one extra texel between glyphs; at 16 px they otherwise touch once thresholded.
+  const gap = title ? 1 : 0;
+  const advances = title ? [...text].map((ch) => Math.ceil(ctx.measureText(ch).width) + gap) : [];
+  const width = Math.max(1, title ? advances.reduce((a, b) => a + b, 0) : Math.ceil(ctx.measureText(text).width));
   scratch.width = width;
   scratch.height = height;
   ctx.font = font;
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#fff';
   ctx.clearRect(0, 0, width, height);
-  ctx.fillText(text, 0, title ? 14 : 6);
+  if (title) {
+    let x = 0;
+    [...text].forEach((ch, i) => {
+      ctx.fillText(ch, x, 14);
+      x += advances[i] ?? 0;
+    });
+  } else ctx.fillText(text, 0, 6);
   const src = ctx.getImageData(0, 0, width, height).data;
   const data = new Uint8Array(width * height * 4);
   for (let i = 0; i < width * height; i++) {

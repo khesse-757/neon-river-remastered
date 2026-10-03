@@ -16,7 +16,7 @@ const only = args.only;
 mkdirSync(out, { recursive: true });
 
 const VIEWS = {
-  desktop: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
+  desktop: { viewport: { width: Number(args.vw ?? 1440), height: Number(args.vh ?? 900) }, deviceScaleFactor: Number(args.dpr ?? 1) },
   mobile: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
 };
 

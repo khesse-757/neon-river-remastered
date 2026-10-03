@@ -37,6 +37,7 @@ export class Overlay {
     mute: el('#btn-mute'),
   };
   private readonly status = el<HTMLElement>('#status');
+  private readonly probe = el<HTMLElement>('#safe-area');
   private texel = 2;
 
   constructor(handlers: Record<ButtonName, () => void>) {
@@ -67,14 +68,27 @@ export class Overlay {
       if (!button.hidden) button.hidden = true;
       return;
     }
+    // Pad in whole texels so the hit area and focus ring stay on the pixel grid.
     const t = this.texel;
-    const w = Math.max(MIN_TOUCH, rect.w * t);
-    const h = Math.max(MIN_TOUCH, rect.h * t);
-    const x = Math.max(0, rect.x * t - (w - rect.w * t) / 2);
-    const y = Math.max(0, rect.y * t - (h - rect.h * t) / 2);
-    const style = `left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px`;
+    const padX = Math.max(0, Math.ceil((MIN_TOUCH - rect.w * t) / 2 / t));
+    const padY = Math.max(0, Math.ceil((MIN_TOUCH - rect.h * t) / 2 / t));
+    const x = Math.max(0, rect.x - padX) * t;
+    const y = Math.max(0, rect.y - padY) * t;
+    const w = (rect.w + padX * 2) * t;
+    const h = (rect.h + padY * 2) * t;
+    const style = `left:${x.toFixed(3)}px;top:${y.toFixed(3)}px;width:${w.toFixed(3)}px;height:${h.toFixed(3)}px`;
     if (button.getAttribute('style') !== style) button.setAttribute('style', style);
     if (button.hidden) button.hidden = false;
+  }
+
+  /** Safe-area insets in CSS pixels, read from a probe padded with env(safe-area-inset-*). */
+  safeInsets(): { top: number; left: number; bottom: number } {
+    const style = getComputedStyle(this.probe);
+    return {
+      top: parseFloat(style.paddingTop) || 0,
+      left: parseFloat(style.paddingLeft) || 0,
+      bottom: parseFloat(style.paddingBottom) || 0,
+    };
   }
 
   /** Announce the screen and move focus to its main action. */
@@ -83,7 +97,7 @@ export class Overlay {
     const won = summary.cause === null;
     const text =
       mode === 'title'
-        ? 'Neon River. Catch 200 pounds, let no more than 20 pounds escape, never net an electric eel.'
+        ? 'Neon River. Catch 200 pounds, do not let 20 pounds escape, never net an electric eel.'
         : mode === 'paused'
           ? 'Paused.'
           : mode === 'over'

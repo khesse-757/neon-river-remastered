@@ -162,7 +162,8 @@ export class Sim {
       lane: prev?.emitter.lane ?? 0.5,
       dir: prev?.emitter.dir ?? (this.rng.next() < 0.5 ? 1 : -1),
       swingLeft: this.rng.range(phase.swingMin, phase.swingMax),
-      spawnTimer: Math.min(0.35, phase.period),
+      // Long enough that an eel opening a phase still gets its full warning.
+      spawnTimer: Math.max(this.config.telegraphLead + 0.05, Math.min(0.35, phase.period)),
       next: this.rollKind(phase),
       telegraphed: false,
     };

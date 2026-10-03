@@ -14,8 +14,8 @@ export interface SpriteGrid {
 
 /** v1 palettes (index 1 is the outline). */
 export const FISH_COLORS: Readonly<Record<FishKind, readonly string[]>> = {
-  // Lifted two steps from v1's blues so a bluegill still reads against the night water.
-  bluegill: ['', '#0a0a1a', '#2b597f', '#547ea2', '#729fb4', '#c7e1e8', '#ffffff', '#29bbc2'],
+  // Lifted to moonlit silver-blues from v1's darker blues so a bluegill still reads against the night water.
+  bluegill: ['', '#0a0a1a', '#305f86', '#6d9bb1', '#99c8cd', '#c5e1e8', '#ffffff', '#29bcc2'],
   koi: ['', '#2a1a0a', '#cc6600', '#ff9933', '#ffcc66', '#ffeecc', '#ffffff', '#ffdd88'],
   eel: ['', '#0a0a1a', '#1a1a3a', '#2a2a5a', '#00ffff', '#44ffff', '#ffffff', '#0088aa', '#29bcc2'],
 };
@@ -89,19 +89,19 @@ const V1_EEL = [
 const BLUEGILL_MID = [
   '.7.....7.',
   '.77...77.',
-  '..77377..',
-  '...232...',
-  '..23332..',
-  '.2333352.',
-  '.2333552.',
-  '72333552.',
-  '.2363552.',
-  '..23352..',
-  '...232...',
-  '....2....',
+  '..77477..',
+  '...343...',
+  '..34443..',
+  '.3444453.',
+  '.3444553.',
+  '73444553.',
+  '.3464553.',
+  '..34453..',
+  '...343...',
+  '....3....',
 ];
-const BLUEGILL_FAR = ['7....7', '.7..7.', '..33..', '.2332.', '233352', '236352', '.2352.', '..22..'];
-const BLUEGILL_TINY = ['7.7', '.3.', '333', '353', '.2.'];
+const BLUEGILL_FAR = ['7....7', '.7..7.', '..44..', '.3443.', '344453', '346453', '.3453.', '..33..'];
+const BLUEGILL_TINY = ['7.7', '.4.', '454', '454', '.4.'];
 
 const KOI_MID = [
   '..7....7..',

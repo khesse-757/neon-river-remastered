@@ -67,12 +67,11 @@ export class Input {
       (e) => {
         this.gesture();
         if (e.pointerType === 'mouse') return;
-        if (this.touchId === null) {
-          this.touchId = e.pointerId;
-          this.touchX = e.clientX;
-          this.device = 'touch';
-          if (this.touchMode === 'absolute') this.mouseLane = this.laneAt(e.clientX);
-        }
+        // The newest finger takes over, so handing off between thumbs never drops input.
+        this.touchId = e.pointerId;
+        this.touchX = e.clientX;
+        this.device = 'touch';
+        if (this.touchMode === 'absolute') this.mouseLane = this.laneAt(e.clientX);
         e.preventDefault();
       },
       surface,
@@ -116,6 +115,11 @@ export class Input {
       return { kind: 'delta', lanes };
     }
     return { kind: 'none' };
+  }
+
+  /** Drop drag travel collected while the game was not consuming input (paused). */
+  flush(): void {
+    this.pendingDelta = 0;
   }
 
   /** Forget pointer state so a new run does not inherit a stale target. */

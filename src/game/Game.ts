@@ -72,6 +72,9 @@ export class Game {
   private frozen = false;
   private reducedMotion = false;
   private autoplay = false;
+  /** A pinned seed (URL or test hook) replays the same night; otherwise each run is new. */
+  private seedPinned = false;
+  private runCount = 0;
   private hitstop = 0;
   private lossCause: LossCause | null = null;
   private lossTimer = 0;
@@ -90,6 +93,7 @@ export class Game {
     private readonly canvas: HTMLCanvasElement,
     private readonly options: GameOptions = {},
   ) {
+    this.seedPinned = options.seed !== undefined;
     this.seed = options.seed ?? 1;
     const grid = GRIDS.find(([w, h]) => `${w}x${h}` === options.grid) ?? DEFAULT_GRID;
     this.gridScale = grid[0] / 768;
@@ -171,6 +175,9 @@ export class Game {
   }
 
   private startRun(startPhase = 0, skipRest = false): void {
+    // Wall-clock time only picks the seed; the run itself stays deterministic for that seed.
+    if (!this.seedPinned) this.seed = (Date.now() + this.runCount * 7919) >>> 0;
+    this.runCount += 1;
     this.sim = new Sim({ seed: this.seed, river: this.river, config: this.config, startPhase, skipRest });
     this.fx = createRng(this.seed ^ 0x9e3779b9);
     this.accumulator = 0;
@@ -189,6 +196,7 @@ export class Game {
   }
 
   private setMode(mode: Mode): void {
+    if (mode === 'playing' && this.mode === 'paused') this.input?.flush();
     this.mode = mode;
     this.audio.setPaused(mode === 'paused');
     const s = this.sim.state;
@@ -367,7 +375,7 @@ export class Game {
       const last = this.wake.get(fish.id) ?? 0;
       if (fish.status === 'swimming' && this.time - last > 0.14 && rel > 0.2) {
         this.wake.set(fish.id, this.time);
-        ripples.inject(p.x, p.y - 3 * rel, 1.2 + 2 * rel, 0.16 + 0.2 * rel);
+        ripples.inject(p.x, p.y - 3 * rel, 1 + 1.5 * rel, 0.08 + 0.1 * rel);
       }
       if (fish.kind === 'eel' && fish.status === 'swimming' && rel > 0.22 && this.fx.next() < dt * (fish.firstEel ? 22 : 12)) {
         particles.emit({
@@ -451,7 +459,7 @@ export class Game {
       lights.push({ x: e.x, y: e.y, radius: 4 * gs, intensity: flick, color: C.shimmer });
     }
     if (this.telegraph) {
-      const e = this.gridPoint(0.04, this.telegraph.lane);
+      const e = this.gridPoint(0.04, state.emitter.lane);
       const grow = Math.min(1, this.telegraph.age / this.config.telegraphLead);
       lights.push({ x: e.x, y: e.y, radius: (4 + 7 * grow) * gs, intensity: 0.5 + 0.4 * grow, color: C.eel });
     }
@@ -478,7 +486,7 @@ export class Game {
       netKick: this.netKick > 0.06 ? 1 : 0,
       netVisible: this.mode !== 'title',
       lights,
-      lantern: (0.92 + 0.08 * Math.sin(this.time * 2.3)) * flicker * (1 - darken),
+      lantern: (0.6 + 0.06 * Math.sin(this.time * 2.3)) * flicker * (1 - darken),
       breath: Math.sin(this.time * 1.4) > 0.3 ? 1 : 0,
       lean: this.mode === 'title' ? 0 : state.net.lane < 0.33 ? -1 : state.net.lane > 0.72 ? 1 : 0,
       jolt: shock > 0 && shock < 0.5 ? (Math.floor(shock * 30) % 2 === 0 ? 1 : -1) : 0,
@@ -496,11 +504,15 @@ export class Game {
     const s = this.sim.state;
     const show = this.mode === 'playing' || this.mode === 'paused' || this.mode === 'over';
 
-    const gutter = targetH - (originY + gridH);
+    const safe = this.safeTexels();
+    const bottom = targetH - safe.bottom;
+    const gutter = bottom - (originY + gridH);
     const w = 100;
     const h = 23;
-    const x = gutter >= h + 6 ? Math.floor(targetW / 2 - w / 2) : originX + 4;
-    const y = gutter >= h + 6 ? originY + gridH + Math.floor((gutter - h) / 2) : originY + gridH - h - 5;
+    const inGutter = gutter >= h + 6;
+    const x = inGutter ? Math.floor(targetW / 2 - w / 2) : Math.max(originX, safe.left) + 4;
+    // Without a gutter the tablet sits on the cobbles, inside whatever part of them is visible.
+    const y = inGutter ? originY + gridH + Math.floor((gutter - h) / 2) : Math.min(bottom, originY + gridH) - h - 4;
     v.panel('hud-edge', x - 1, y - 1, w + 2, h + 2, show ? '#030911' : null);
     v.panel('hud-body', x, y, w, h, show ? '#404d51' : null);
     v.panel('hud-lip', x, y, w, 1, show ? '#5f696c' : null);
@@ -545,8 +557,10 @@ export class Game {
     const top = Math.max(0, originY);
     const height = Math.min(targetH, originY + gridH) - top;
     const at = (f: number): number => top + Math.floor(height * f);
+    // Body text sits on a dark strip so it stays legible over foam, grass and neon.
     const text = (id: string, on: boolean, str: string, y: number, color: string): void => {
-      v.label(id, on ? str : '', cx, y, color, 'center');
+      const tw = v.label(id, on ? str : '', cx, y, color, 'center');
+      v.panel(`${id}-strip`, cx - Math.ceil(tw / 2) - 3, y - 2, tw + 6, 11, on ? '#030911' : null, 11);
     };
     const button = (name: 'start' | 'resume' | 'retry', on: boolean, str: string, y: number): void => {
       const tw = v.label(`btn-${name}-text`, on ? str : '', cx, y + 6, '#ffd98a', 'center');
@@ -563,12 +577,12 @@ export class Game {
     };
     const title = this.mode === 'title';
     heading('title-logo', title, 'NEON RIVER', at(0.27) - 8, '#8ff8ff');
-    text('title-sub', title, 'A NIGHT ON THE WATER', at(0.27) + 13, '#6d9bb1');
+    text('title-sub', title, 'A NIGHT ON THE WATER', at(0.27) + 13, '#99c8cd');
     text('title-rule-1', title, 'CATCH 200 LB', at(0.42), '#c5e1e8');
-    text('title-rule-2', title, 'LET NO MORE THAN 20 LB ESCAPE', at(0.42) + 11, '#c5e1e8');
+    text('title-rule-2', title, "DON'T LET 20 LB ESCAPE", at(0.42) + 11, '#c5e1e8');
     text('title-rule-3', title, 'NEVER NET AN ELECTRIC EEL', at(0.42) + 22, '#c5e1e8');
     button('start', title, 'TAP TO FISH', at(0.58));
-    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 30, '#6d9bb1');
+    text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 30, '#99c8cd');
 
     const paused = this.mode === 'paused';
     heading('paused-title', paused, 'PAUSED', at(0.36) - 8, '#8ff8ff');
@@ -579,19 +593,44 @@ export class Game {
     heading('over-title', over, won ? 'A FULL NET' : 'THE NIGHT ENDS', at(0.3) - 8, won ? '#ffd98a' : '#8ff8ff');
     const cause = won ? 'THE RIVER PROVIDES' : this.lossCause === 'eel' ? 'AN ELECTRIC EEL FOUND YOUR NET' : 'TOO MANY FISH SLIPPED AWAY';
     text('over-cause', over, cause, at(0.3) + 14, '#c5e1e8');
-    text('over-stats-1', over, `${s.caught} LB CAUGHT - ${s.escaped} LB ESCAPED`, at(0.3) + 30, '#6d9bb1');
-    text('over-stats-2', over, `BEST STREAK ${s.bestStreak}`, at(0.3) + 41, '#6d9bb1');
+    text('over-stats-1', over, `${s.caught} LB CAUGHT - ${s.escaped} LB ESCAPED`, at(0.3) + 30, '#99c8cd');
+    text('over-stats-2', over, `BEST STREAK ${s.bestStreak}`, at(0.3) + 41, '#99c8cd');
     button('retry', over, 'FISH AGAIN', at(0.3) + 58);
 
-    // Pause and sound, top-left, clear of the river.
+    // Pause and sound, top-left, clear of the river. Each is drawn at least 44 CSS px square and
+    // inside the safe area, so the art, the hit area and the focus ring are the same rectangle.
     const controls = this.mode === 'playing' || this.mode === 'paused';
-    v.panel('ctl-pause-body', 3, 3, 13, 13, controls ? '#091a27' : null, 12);
-    v.label('ctl-pause-text', controls ? (paused ? '>' : 'II') : '', 10, 6, '#99c8cd', 'center');
+    const safe = this.safeTexels();
+    const size = Math.max(13, Math.ceil(44 / this.texelCss()));
+    const px = safe.left + 3;
+    const py = safe.top + 3;
+    const mw = Math.max(33, size);
+    const ty = py + Math.floor((size - 7) / 2);
+    v.panel('ctl-pause-body', px, py, size, size, controls ? '#091a27' : null, 12);
+    v.label('ctl-pause-text', controls ? (paused ? '>' : 'II') : '', px + Math.ceil(size / 2), ty, '#99c8cd', 'center');
     const sound = this.audio.isMuted ? 'MUTED' : 'SOUND';
-    v.panel('ctl-mute-body', 18, 3, 33, 13, controls ? '#091a27' : null, 12);
-    v.label('ctl-mute-text', controls ? sound : '', 35, 6, this.audio.isMuted ? '#6d9bb1' : '#99c8cd', 'center');
-    this.overlay.place('pause', controls ? { x: 2, y: 2, w: 15, h: 15 } : null);
-    this.overlay.place('mute', controls ? { x: 18, y: 2, w: 34, h: 15 } : null);
+    v.panel('ctl-mute-body', px + size + 2, py, mw, size, controls ? '#091a27' : null, 12);
+    v.label(
+      'ctl-mute-text',
+      controls ? sound : '',
+      px + size + 2 + Math.ceil(mw / 2),
+      ty,
+      this.audio.isMuted ? '#6d9bb1' : '#99c8cd',
+      'center',
+    );
+    this.overlay.place('pause', controls ? { x: px, y: py, w: size, h: size } : null);
+    this.overlay.place('mute', controls ? { x: px + size + 2, y: py, w: mw, h: size } : null);
+  }
+
+  private texelCss(): number {
+    return this.view.layout.scale / (window.devicePixelRatio || 1);
+  }
+
+  /** Device safe-area insets (notch, home indicator) in whole target texels. */
+  private safeTexels(): { top: number; left: number; bottom: number } {
+    const inset = this.overlay.safeInsets();
+    const t = this.texelCss();
+    return { top: Math.ceil(inset.top / t), left: Math.ceil(inset.left / t), bottom: Math.ceil(inset.bottom / t) };
   }
 
   private installTestHooks(): void {
@@ -603,7 +642,8 @@ export class Game {
       const warm = 1.5;
       for (let t = 0; t < seconds - warm && this.sim.state.status === 'playing'; t += STEP) {
         this.sim.step(STEP, opts.idle ? { kind: 'none' } : trackerIntent(this.sim.state, this.config.net.radius));
-        for (const e of this.sim.drainEvents()) if (e.type === 'restStart' || e.type === 'phaseStart') this.onEvent(e);
+        for (const e of this.sim.drainEvents())
+          if (e.type === 'restStart' || e.type === 'phaseStart' || e.type === 'lose' || e.type === 'win') this.onEvent(e);
       }
       // The last stretch runs through the full frame path so wakes, ripples and particles exist.
       for (let t = 0; t < warm && this.mode === 'playing'; t += STEP) this.frame(STEP);
@@ -612,6 +652,7 @@ export class Game {
     window.__THREE_GAME_TEST_HOOKS__ = {
       seed: (value: number) => {
         this.seed = value;
+        this.seedPinned = true;
       },
       setState: async (name: string) => {
         await this.ready;
@@ -630,9 +671,21 @@ export class Game {
           this.sim.debugSpawn('eel', this.sim.state.net.lane, 0.97);
           this.autoplay = false;
           for (let i = 0; i < 240 && this.mode !== 'over'; i++) this.frame(STEP);
+          if (this.mode !== 'over' || this.lossCause !== 'eel') throw new Error(`loss-eel not reached (cause ${this.lossCause})`);
         } else if (name === 'loss-escaped') {
-          settle(60, { idle: true });
-          for (let i = 0; i < 120 && this.mode !== 'over'; i++) this.frame(STEP);
+          // A net that keeps clear of everything, so the night ends on the escape budget.
+          this.frozen = false;
+          this.startRun();
+          while (this.sim.state.status === 'playing') {
+            const arriving = this.sim.state.fish.filter((f) => f.status === 'swimming' && f.progress > 0.6).map((f) => f.lane);
+            const spots = [0, 0.2, 0.4, 0.6, 0.8, 1];
+            const clear = (lane: number): number => Math.min(1, ...arriving.map((l) => Math.abs(l - lane)));
+            const lane = spots.reduce((best, c) => (clear(c) > clear(best) ? c : best), this.sim.state.net.lane);
+            this.sim.step(STEP, { kind: 'target', lane });
+            for (const e of this.sim.drainEvents()) this.onEvent(e);
+          }
+          for (let i = 0; i < 240 && this.mode !== 'over'; i++) this.frame(STEP);
+          if (this.mode !== 'over' || this.lossCause !== 'escaped') throw new Error(`loss-escaped not reached (cause ${this.lossCause})`);
         } else throw new Error(`Unknown test state: ${name}`);
         this.frame(0);
         return { state: name };

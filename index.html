@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#030911" />
     <meta
       name="description"
-      content="Neon River: a pixel-art night-fishing arcade game. Catch 200 lb, let no more than 20 lb escape, never net an electric eel."
+      content="Neon River: a pixel-art night-fishing arcade game. Catch 200 lb, do not let 20 lb escape, never net an electric eel."
     />
     <link rel="icon" href="data:," />
     <title>Neon River</title>
@@ -15,6 +15,7 @@
     <main id="app">
       <canvas id="game-canvas" aria-label="Neon River: slide the net across the river to catch fish"></canvas>
       <div id="overlay">
+        <div id="safe-area" aria-hidden="true"></div>
         <p id="status" role="status" aria-live="polite"></p>
         <button id="btn-pause" type="button" aria-label="Pause"></button>
         <button id="btn-mute" type="button" aria-pressed="false" aria-label="Sound on. Turn sound off"></button>

@@ -76,3 +76,15 @@ Media: `docs/media/gate-1/` — `before-after-v1-vs-gate1.png`,
 - Hear the audio. The ambience loop's seam is measured (no padding, wrap jump an
   order of magnitude under a normal sample step), not listened to.
 - Test on a real phone or Safari.
+
+### The independent review found what I had stopped seeing
+
+A reviewer agent ran the build cold in its own worktree and came back with
+"needs fixes": the HUD numbers were off-screen on a 1536×864 laptop, pause and
+mute overlapped on a phone, there was no safe-area handling, bluegill were
+nearly invisible for two-thirds of the river, and one of my test hooks
+(`loss-escaped`) had never actually shown the loss screen — so a capture I had
+counted as evidence was just a picture of normal play. All fixed; the two loss
+hooks now throw if they don't reach the state they claim. Still open: at the
+far bend the river is three pixels wide, so you cannot read which lane a fish
+is in until it is a quarter of the way down.

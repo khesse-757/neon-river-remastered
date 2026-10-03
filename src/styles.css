@@ -58,6 +58,13 @@ body {
   pointer-events: none;
 }
 
+/* Measured from script to keep in-canvas UI out of notches and the home indicator. */
+#safe-area {
+  position: absolute;
+  visibility: hidden;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
 /* Screen-reader text; everything visible is drawn in the canvas on the pixel grid. */
 #status {
   position: absolute;

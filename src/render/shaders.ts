@@ -85,7 +85,7 @@ vec3 applyLights(vec3 col, ivec2 t, bool water) {
   // Lantern: a warm ramp that keeps the lit surface's own texture; only a hint reaches the water.
   vec2 ld = (vec2(t) - uLantern.xy) / uLantern.z;
   float ls = lightStep(1.0 - length(ld)) * uLantern.w * (water ? 0.3 : 1.0);
-  col = col * mix(vec3(1.0), vec3(2.2, 1.6, 0.9), ls) + vec3(0.1, 0.05, 0.0) * ls;
+  col = col * mix(vec3(1.0), vec3(1.9, 1.45, 0.9), ls) + vec3(0.06, 0.03, 0.0) * ls;
   return col;
 }
 `;
@@ -191,10 +191,10 @@ void main() {
     col = pick > 0.985 ? vec3(0.612, 0.796, 0.812) : vec3(0.231, 0.427, 0.573);
     lit = true;
   }
-  if (h > 0.16) {
-    col = h > 0.42 ? vec3(0.78, 0.882, 0.91) : vec3(0.447, 0.624, 0.706);
+  if (h > 0.24) {
+    col = h > 0.5 ? vec3(0.78, 0.882, 0.91) : vec3(0.447, 0.624, 0.706);
     lit = true;
-  } else if (h < -0.22) {
+  } else if (h < -0.3) {
     col = vec3(0.016, 0.122, 0.255);
     lit = true;
   }

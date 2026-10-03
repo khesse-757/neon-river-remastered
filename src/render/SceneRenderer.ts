@@ -409,8 +409,6 @@ export class SceneRenderer {
     this.shared.uNeon!.value = view.neon;
     this.shared.uDarken!.value = view.darken;
     this.compositeMaterial.uniforms.uGlitch!.value = view.glitch;
-    // A dimmed scene is posterised flat; dithering a uniform darken reads as screen-door noise.
-    this.compositeMaterial.uniforms.uDither!.value = view.darken > 0 ? 0 : 0.9;
 
     for (let i = 0; i < MAX_LIGHTS; i++) {
       const l = view.lights[i];
@@ -544,7 +542,7 @@ export class SceneRenderer {
       // Quantised phase: the swim cycle steps through eight poses instead of sliding.
       const phase = (Math.floor((f.phase / (Math.PI * 2)) * 8) / 8) * Math.PI * 2;
       iAnim.setXYZW(n, phase, amp, Math.max(-0.7, Math.min(0.7, f.slope)), eel ? 1 : 0);
-      const tint = (eel ? 0.1 : f.kind === 'koi' ? 0.14 : 0.1) * f.scoop;
+      const tint = (eel ? 0.1 : f.kind === 'koi' ? 0.14 : 0.04) * f.scoop;
       iLook.setXYZW(n, tint, f.flash, f.scoop < 0.35 ? 0.5 : 1, 0);
       n++;
     }

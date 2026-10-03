@@ -217,6 +217,50 @@ describe('phases and emitter', () => {
   });
 });
 
+describe('eel warnings and spacing at the net', () => {
+  it('gives every eel its full telegraph lead, even as the first spawn of a phase', () => {
+    for (const seed of SEEDS.slice(0, 60)) {
+      const sim = new Sim({ seed, river });
+      let warnedAt: number | null = null;
+      for (let i = 0; i < 34 / DT && sim.state.status === 'playing'; i++) {
+        sim.step(DT, tracker(sim));
+        for (const e of sim.drainEvents()) {
+          if (e.type === 'telegraph') warnedAt = sim.state.time;
+          if (e.type === 'spawn' && e.fish.kind === 'eel') {
+            expect(warnedAt).not.toBeNull();
+            expect(sim.state.time - (warnedAt ?? 0)).toBeGreaterThanOrEqual(DEFAULT_CONFIG.telegraphLead - 2 * DT);
+            warnedAt = null;
+          }
+        }
+      }
+    }
+  });
+
+  it('never has an eel and a fish cross the rail close together in both time and lane', () => {
+    // Measured where it matters: actual rail-crossing times and lanes, not spawn-time estimates.
+    const { eelWindow, eelGap } = DEFAULT_CONFIG.fairness;
+    for (const seed of SEEDS) {
+      const sim = new Sim({ seed, river, config: { ...DEFAULT_CONFIG, maxEscaped: 1e9 } });
+      const crossings: { t: number; lane: number; eel: boolean }[] = [];
+      const seen = new Set<number>();
+      for (let i = 0; i < 34 / DT; i++) {
+        sim.step(DT, idle());
+        sim.drainEvents();
+        for (const f of sim.state.fish)
+          if (f.progress >= 1 && !seen.has(f.id) && f.status !== 'scooped') {
+            seen.add(f.id);
+            crossings.push({ t: sim.state.time, lane: f.lane, eel: f.kind === 'eel' });
+          }
+        if (sim.state.status !== 'playing') break;
+      }
+      for (const a of crossings)
+        for (const b of crossings)
+          if (a.eel && !b.eel && Math.abs(a.t - b.t) <= eelWindow - 2 * DT)
+            expect(Math.abs(a.lane - b.lane)).toBeGreaterThanOrEqual(eelGap - 1e-6);
+    }
+  });
+});
+
 describe('fairness guards', () => {
   it('pulls far non-eel jumps to the midpoint and keeps eels clear of fish, on 200 seeds', () => {
     const { maxJump, eelWindow, eelGap } = DEFAULT_CONFIG.fairness;
@@ -310,10 +354,21 @@ describe('catching and scoring', () => {
   });
 
   it('loses at 20 lb escaped and wins at 200 lb caught', () => {
-    const idleRun = run(5, 120, idle);
-    expect(idleRun.sim.state.status).toBe('lost');
-    expect(idleRun.sim.state.lossCause).toBe('escaped');
-    expect(idleRun.sim.state.escaped).toBeGreaterThanOrEqual(20);
+    // A net parked at the bank with no eels in the script: only the escape budget can end it,
+    // and it ends exactly when the 20th pound slips past.
+    const noEels: SimConfig = { ...DEFAULT_CONFIG, phases: DEFAULT_CONFIG.phases.map((p) => ({ ...p, eelChance: 0, sweep: 0 })) };
+    for (const seed of SEEDS.slice(0, 20)) {
+      const sim = new Sim({ seed, river, config: noEels });
+      let before = 0;
+      for (let i = 0; i < 200 / DT && sim.state.status === 'playing'; i++) {
+        before = sim.state.escaped;
+        sim.step(DT, { kind: 'target', lane: sim.state.emitter.lane > 0.5 ? 0 : 1 });
+      }
+      expect(sim.state.status).toBe('lost');
+      expect(sim.state.lossCause).toBe('escaped');
+      expect(before).toBeLessThan(20);
+      expect(sim.state.escaped).toBeGreaterThanOrEqual(20);
+    }
 
     const win = new Sim({ seed: 1, river, config: { ...quiet, winWeight: 10 } });
     win.debugSpawn('koi', 0.5, 0.9);

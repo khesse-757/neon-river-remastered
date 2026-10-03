@@ -43,7 +43,7 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 
 ## Completed (Gate 1)
 - Repo `khesse-757/neon-river-remastered` (public), `main` pushed, branch `gate-1/look-dev`, draft PR #1, CI green.
-- Sim: rng, camera, river, net, emitter + fairness, director, catching, scoring; 20 Vitest tests incl. 200-seed invariants.
+- Sim: rng, camera, river, net, emitter + fairness, director, catching, scoring; 22 Vitest tests incl. 200-seed invariants.
 - Scene build script, masks, palette; pixel pipeline; water; ripple field; sway; neon; lantern; fisherman deformation; particles.
 - Input: mouse, keyboard, relative touch, gamepad. Audio bus + 3 generated files + procedural voices.
 - Dev tools: lil-gui + path editor (dev or `?debug` only, separate chunk).
@@ -59,10 +59,26 @@ See docs/design/REMASTER_BRIEF.md. Pixel art stays; three.js renders it.
 ## Pending jobs / task IDs
 - None. ElevenLabs: 3 sound-effect generations done (ambience loop, two splashes). Full batch waits for Gate 2.
 
+## Fresh-eyes review (2026-10-02, HEAD 4d1a553): "needs fixes" — 6 majors, 12 minors
+Fixed after the review (not re-reviewed by the agent; verified by my own captures, unit tests and e2e):
+- HUD tablet clipped when the painting is cropped (1536×864 @1.25, `?grid=256x459` desktop) → placed inside the visible area.
+- `loss-escaped` hook never reached the loss screen and often ended by eel → now a net that dodges everything; both loss hooks throw if the state is not reached. The earlier evidence manifest did not include loss-escaped.
+- Pause/mute hit areas overlapped → drawn ≥ 44 CSS px, hit area = art, padded in whole texels (focus ring on grid).
+- Safe areas → controls and HUD offset by `env(safe-area-inset-*)`. Emulation reports zero insets, so this is untested on a real notch.
+- Bluegill readability → silver-blue ramp, brighter small sizes, almost no depth tint.
+- Title/pause/loss dimming blotches → dither stays on with the night-blue mix; body text on dark strips; heading glyphs spaced one texel.
+- Minors fixed: fresh seed per run unless `?seed=` or the hook pins it; drags made while paused are dropped; newest finger takes over; telegraph glow follows the emitter; eels opening a phase get the full 0.6 s warning; rule text now "don't let 20 lb escape"; quieter fish wakes and lantern slab.
+- Tests added: telegraph lead ≥ 0.6 s; eel/fish separation measured at actual rail crossings on 200 seeds; escape loss lands exactly on the 20th pound.
+
 ## Known defects / open items
+- **Lane is unreadable at the far bend**: the river is ~3 texels wide at spawn and ~18 at 25% of the trip, so the emitter shimmer cannot show a lane there. Needs a design answer in Gate 2 (start the playable path lower, or a lane indicator).
+- ~5% of eel telegraphs are false alarms: the fairness guard turns the eel into a bluegill after the warning.
+- `paletteReport()` reads the composite target, which can only output palette colors, so it proves the pipeline is wired, not that inputs were in range. DOM focus rings are outside the palette pass.
+- Net hoop overhangs the left bank at lane 0. Streak badge can sit on the pole when the HUD is on the cobbles.
+- Landscape phones get a 216-px-wide painting and no orientation hint. 320-px-wide phones and 1440×900 only reach ×2.
 - Wide-screen gutters are plain night + stars (brief §4.10 is Gate 2).
-- Desktop at 1440×900 shows the painting at ×2 (774 px tall, 86% of height).
 - Kyle must ear-check the ambience loop and splash levels; I can only measure them.
+- Gamepad untested (not available headless). Real phone / Safari untested.
 - Eel hitbox/visual and phase balance are untuned (Gate 2, playtester).
 - Sourcemaps and `public/assets/original/background.png` ship in `dist/` (Gate 4 cleanup).
 - Brief flags 1 and 3 (win time vs table; Braided Stream density) are open until Gate 2.

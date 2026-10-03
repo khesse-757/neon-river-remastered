@@ -9,7 +9,7 @@ const game = new Game(canvas, {
   grid: params.get('grid'),
   fish: params.get('fish'),
   forceByteRipples: params.get('ripple') === 'byte',
-  seed: Number(params.get('seed')) || 1,
+  seed: params.has('seed') ? Number(params.get('seed')) || 1 : undefined,
 });
 game.start();
 
