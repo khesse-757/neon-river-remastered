@@ -1,0 +1,9 @@
+dist/
+node_modules/
+reference/
+artifacts/
+public/
+package-lock.json
+.claude/
+docs/design/
+prompts/

@@ -1,0 +1,55 @@
+{
+  "name": "neon-river-remastered",
+  "version": "2.0.0-gate1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc && vite build",
+    "postbuild": "node scripts/check-secrets.mjs --dir dist",
+    "preview": "vite preview --host 127.0.0.1",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "npm run lint && npm run typecheck && npm run test && node scripts/check-secrets.mjs --tracked",
+    "build:scene": "node scripts/build-scene.mjs",
+    "inspect:canvas": "node scripts/inspect-threejs-canvas.mjs",
+    "verify:visual": "playwright test tests/e2e/smoke.spec.ts",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "lil-gui": "^0.21.0",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/three": "^0.184.1",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "pngjs": "^7.0.0",
+    "prettier": "^3.9.9",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vite": "^8.0.13",
+    "vitest": "^5.0.3"
+  },
+  "lint-staged": {
+    "*.{ts,mjs,js}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,html,yml}": [
+      "prettier --write"
+    ]
+  }
+}

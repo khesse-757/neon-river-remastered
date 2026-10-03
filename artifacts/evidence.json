@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "runId": "gate1-pass-1",
+  "captures": [
+    { "mode": "desktop", "state": "title", "report": "artifacts/pass-gate1-1/desktop-title.json" },
+    { "mode": "mobile", "state": "title", "report": "artifacts/pass-gate1-1/mobile-title.json" },
+    { "mode": "desktop", "state": "active-play", "report": "artifacts/pass-gate1-1/desktop-active-play.json" },
+    { "mode": "mobile", "state": "active-play", "report": "artifacts/pass-gate1-1/mobile-active-play.json" },
+    { "mode": "desktop", "state": "phase.first-spark", "report": "artifacts/pass-gate1-1/desktop-first-spark.json" },
+    { "mode": "mobile", "state": "phase.lantern-koi", "report": "artifacts/pass-gate1-1/mobile-lantern-koi.json" },
+    { "mode": "mobile", "state": "rest", "report": "artifacts/pass-gate1-1/mobile-rest.json" },
+    { "mode": "desktop", "state": "pause", "report": "artifacts/pass-gate1-1/desktop-pause.json" },
+    { "mode": "desktop", "state": "loss-eel", "report": "artifacts/pass-gate1-1/desktop-loss-eel.json" },
+    { "mode": "mobile", "state": "loss-eel", "report": "artifacts/pass-gate1-1/mobile-loss-eel.json" }
+  ]
+}
