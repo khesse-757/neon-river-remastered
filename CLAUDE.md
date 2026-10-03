@@ -45,13 +45,21 @@ set by the verification budget below.
 
 ## Verification budget (lean mode)
 
-- Per change: `npm run check` + the Playwright smoke test. Rely on CI for the rest.
+- Per change: `npm run check` + `npm run test:smoke`. The full suite (`npm run test:full`, or the `full-e2e` workflow) runs before a release, not per change.
 - Screenshots: only of the screen you changed, one viewport, only when the change is visual. No videos unless Kyle asks.
 - No canvas-inspector manifests or scorecards until the release pass.
 - playtester: only when spawn/balance code changes, 100 human-like + 20 oracle seeds, one run. No re-runs to chase a 2–3% shift.
 - fresh-eyes-reviewer: once at the end of this gate and once on the release candidate. Not per change.
 - Kyle playtests on real devices; prefer asking him over more bot tuning.
 - Keep reports short: what changed, what ran, what Kyle needs to decide.
+
+## CI
+
+Two required jobs run in parallel on every PR and push to `main` (`.github/workflows/ci.yml`): `check` (lint,
+typecheck, quick unit tests, build, secret scans; no browser) and `e2e-smoke` (`npm run test:smoke`; skipped and
+green when only `docs/` or `*.md` changed). Both should finish in about a minute; keep them that way. Anything
+slow belongs in `npm run test:full` / the manual `full-e2e` workflow. The many-seed unit tests run in the
+pre-commit hook (`npm run test`), not in CI.
 
 ## Git and GitHub (you own this)
 
@@ -104,8 +112,13 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 - `npm run preview` — serve the build at http://127.0.0.1:4188
 - `npm run check` — lint + typecheck + unit tests + secret scan of tracked files
 - `npm run test` — Vitest suites (`tests/sim/`, `tests/audio/`, `tests/game/`)
-- `npm run test:e2e` — Playwright on desktop + mobile projects (`tests/e2e/`): smoke with real input, and
-  `audio.spec.ts`, which measures the output level for every `?audition` button and the in-game cues
+- `npm run test:quick` — the unit suites without the many-seed whole-night tests (what CI's `check` job runs, ~2 s)
+- `npm run test:smoke` — the required CI browser check (`tests/e2e/ci.spec.ts`, Playwright project `ci`): desktop
+  Chromium, `?ci` picture, game time ×4; loads without console errors, canvas not blank, a catch and its sound,
+  Space pause/resume, an eel loss, the win through the hook. About 10 s locally
+- `npm run test:full` (alias `test:e2e`) — desktop + mobile projects: `smoke.spec.ts` with real input, and
+  `audio.spec.ts`, which measures the output level for every `?audition` button and the in-game cues. Run it
+  before a release, or trigger the `full-e2e` workflow (`gh workflow run full-e2e --ref <branch>`)
 - `npm run build:scene` — regenerate palette, re-quantized painting, masks, fisherman from the v1 art
   (`scripts/build-scene.mjs` + `scripts/masks.json`); inspect `artifacts/scene-debug/` afterwards
 - `node scripts/capture.mjs --out <dir> --state <hook-state> [--query "grid=216x387&fish=voxel"] [--frames N]`
@@ -125,11 +138,12 @@ Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `pha
 are not written to the player's records. Other hooks: `audioLevel()` (RMS at the final
 output), `setAudioBeds(on)`, `soloAudio(name)`, `setWeight(lb)`, `setGameMode('zen'|'normal'|'hard')`
 (opens a locked mode for the visit), `openAdvancedAudio(open)`, `openAdvancedVisuals(open)`, `setVisuals(patch)`,
-`gallery()` (the open Field Guide's handle: `select(id)`, `setView('original'|'remaster')`, `close()`).
+`setTimeScale(k)` (game time ×k, 0.1–16), `gallery()` (the open Field Guide's handle: `select(id)`, `setView('original'|'remaster')`, `close()`).
 Dev pages (dev server, or `?debug` on a build): `?tune` (live pace multipliers + copy values), `?audition` (three leitmotif candidates with a
 live level meter; ignores mute and the sound switches; `?theme=lantern|heron|ripple` selects one).
 Look-dev URL params: `?actors=device` (3D layer at full device pixels; default caps it near DPR 2), `?actors=3x`,
-`?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`, `?mode=zen|normal|hard`.
+`?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`, `?mode=zen|normal|hard`, `?ci` (cheapest picture for software-rendered CI: Low quality, no bloom, no
+reflections, half resolution; not saved).
 
 - `node scripts/record.mjs --url http://127.0.0.1:4188 --out <dir>` — 9 s active-play videos on both
   viewports plus fps / draw-call stats; `--clip full` records a whole bot-played night to the win,

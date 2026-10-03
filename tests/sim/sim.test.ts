@@ -12,6 +12,9 @@ import { River } from '../../src/sim/river';
 import { createRng } from '../../src/sim/rng';
 import { EEL_MARGIN, Sim, type SimEvent } from '../../src/sim/sim';
 
+/** Whole-night, many-seed tests. `npm run test:quick` (CI) skips them; `npm run test` and the pre-commit hook run them. */
+const slow = process.env.QUICK ? it.skip : it;
+
 const DT = 1 / 60;
 const river = new River(RIVER);
 const SEEDS = Array.from({ length: 200 }, (_, i) => i + 1);
@@ -143,7 +146,7 @@ describe('net', () => {
 });
 
 describe('stages and emitter', () => {
-  it('opens straight into play with fish already in the river, and never pauses the spawns', () => {
+  slow('opens straight into play with fish already in the river, and never pauses the spawns', () => {
     const { stages, spacing, fairness } = DEFAULT_CONFIG;
     // The longest wait the pattern allows anywhere: the slowest stage's period at the top of its wander.
     const longest = Math.max(stages[0]!.period * spacing[1], fairness.eelWindow + EEL_MARGIN);
@@ -356,7 +359,7 @@ describe('stages and emitter', () => {
     }
   });
 
-  it('draws the chain as a curve: every fish spawns on the emitter, and consecutive fish are close', () => {
+  slow('draws the chain as a curve: every fish spawns on the emitter, and consecutive fish are close', () => {
     for (const seed of SEEDS.slice(0, 30)) {
       const sim = new Sim({ seed, river });
       sim.drainEvents();
@@ -444,7 +447,7 @@ describe('stages and emitter', () => {
     expect(others).toBeGreaterThan(swaps);
   });
 
-  it('has a Zen mode that cannot be lost: eels become fish, escapes cost nothing, and a win can carry on', () => {
+  slow('has a Zen mode that cannot be lost: eels become fish, escapes cost nothing, and a win can carry on', () => {
     expect(MODES.map((m) => m.id)).toEqual(['zen', 'normal', 'hard']);
     expect(new Set(MODES.map((m) => m.id)).size).toBe(MODES.length);
     expect(configFor('normal')).toBe(DEFAULT_CONFIG);
@@ -490,7 +493,7 @@ describe('stages and emitter', () => {
     }
   });
 
-  it('has a Storm Night: five stages from the first speed-up pace, more eels, a 15-lb budget, still winnable', () => {
+  slow('has a Storm Night: five stages from the first speed-up pace, more eels, a 15-lb budget, still winnable', () => {
     const hard = configFor('hard');
     expect(hard.stages.length).toBe(5);
     expect(hard.speedUps.length).toBe(4);
@@ -508,7 +511,7 @@ describe('stages and emitter', () => {
     }
   });
 
-  it('spawns every fish exactly on the emitter in every stage, and keeps S-runs apart', () => {
+  slow('spawns every fish exactly on the emitter in every stage, and keeps S-runs apart', () => {
     for (const seed of SEEDS.slice(0, 60)) {
       const sim = new Sim({ seed, river });
       sim.drainEvents();
@@ -534,7 +537,7 @@ describe('stages and emitter', () => {
     }
   });
 
-  it('keeps the emitter and every spawn inside the river on 200 seeds', () => {
+  slow('keeps the emitter and every spawn inside the river on 200 seeds', () => {
     for (const seed of SEEDS) {
       const sim = new Sim({ seed, river, startStage: seed % 4 });
       for (let i = 0; i < 20 / DT && sim.state.status === 'playing'; i++) {
@@ -766,7 +769,7 @@ describe('the whole night', () => {
   const oracle = (sim: Sim): NetIntent => oracleIntent(sim.state, sim.config);
   const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? NaN;
 
-  it('is winnable on every seed by a planner with the real net, without touching an eel', () => {
+  slow('is winnable on every seed by a planner with the real net, without touching an eel', () => {
     for (const seed of SEEDS.slice(0, 30)) {
       const { sim } = run(seed, 300, oracle);
       expect(sim.state.status, `seed ${seed}`).toBe('won');
@@ -774,7 +777,7 @@ describe('the whole night', () => {
     }
   });
 
-  it('keeps the full eel warning in Bank to Bank, where the pace is fastest', () => {
+  slow('keeps the full eel warning in Bank to Bank, where the pace is fastest', () => {
     let lateEels = 0;
     for (const seed of SEEDS.slice(0, 24)) {
       const sim = new Sim({ seed, river });
@@ -796,7 +799,7 @@ describe('the whole night', () => {
     expect(lateEels).toBeGreaterThan(200);
   });
 
-  it('holds the pace for a human-like player: speed-ups near 0:30, 1:00 and 1:30, a win in 2:00-2:30', () => {
+  slow('holds the pace for a human-like player: speed-ups near 0:30, 1:00 and 1:30, a win in 2:00-2:30', () => {
     const ups: number[][] = [[], [], []];
     const wins: number[] = [];
     const N = 40;

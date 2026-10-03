@@ -95,6 +95,8 @@ export interface GameOptions {
   readonly mode?: string | null;
   readonly forceByteRipples?: boolean;
   readonly seed?: number;
+  /** `?ci`: the cheapest picture (Low quality, no bloom, no reflections, half resolution) for software-rendered CI. Never saved. */
+  readonly ci?: boolean;
 }
 
 export class Game {
@@ -126,6 +128,8 @@ export class Game {
   private time = 0;
   private frameCount = 0;
   private frozen = false;
+  /** Test hook: game time runs this many times faster than the clock. */
+  private timeScale = 1;
   private reducedMotion = false;
   private autoplay = false;
   /** A pinned seed (URL or test hook) replays the same night; otherwise each run is new. */
@@ -305,7 +309,8 @@ export class Game {
 
   /** Push the picture settings to the renderer and the effects that read them. */
   private applyVisuals(): void {
-    const v = this.visuals.settings;
+    const saved = this.visuals.settings;
+    const v: VisualSettings = this.options.ci ? { ...saved, quality: 'low', bloom: false, reflections: false, resolution: 0.5 } : saved;
     this.reducedMotion = v.reduceMotion;
     this.reduceFlashing = v.reduceFlashing;
     this.view?.applyVisuals(v, lookById(v.look));
@@ -578,7 +583,7 @@ export class Game {
       this.publishDiagnostics();
       return;
     }
-    const dt = this.frozen ? 0 : delta;
+    const dt = this.frozen ? 0 : delta * this.timeScale;
     const live = this.mode === 'playing' || (this.mode === 'over' && !this.frozen);
 
     if (this.mode === 'playing' && dt > 0) {
@@ -1649,7 +1654,8 @@ export class Game {
         .filter((f) => f.status === 'scooped')
         .reduce((w, f) => w - this.config.weights[f.kind], this.sim.state.caught);
       // The last stretch runs through the full frame path so wakes, ripples and particles exist.
-      for (let t = 0; t < warm && this.mode === 'playing'; t += STEP) this.frame(STEP);
+      // (Fast-forwarded tests draw fewer frames for the same game time.)
+      for (let t = 0; t < warm && this.mode === 'playing'; t += STEP * this.timeScale) this.frame(STEP);
       this.autoplay = false;
     };
     window.__THREE_GAME_TEST_HOOKS__ = {
@@ -1783,6 +1789,9 @@ export class Game {
         // Tests reach a locked mode without earning it; the unlock is not saved.
         if (this.locked(modeById(id))) this.hookUnlock = true;
         this.setGameMode(id);
+      },
+      setTimeScale: (scale: number) => {
+        this.timeScale = Math.min(16, Math.max(0.1, scale));
       },
       openAdvancedVisuals: (open: boolean) => this.panel.setVisualsOpen(open),
       setVisuals: (patch: Partial<VisualSettings>) => this.visuals.update(patch),
