@@ -169,6 +169,7 @@ export class Game {
     this.overlay = new Overlay({
       start: () => this.confirm(),
       resume: () => this.closePanel(),
+      home: () => this.goHome(),
       retry: () => this.confirm(),
       settings: () => this.toggleSettings(),
       mute: () => {
@@ -225,6 +226,15 @@ export class Game {
     if (this.mode === 'playing' && this.win === 0) this.setMode('paused');
     else if (this.mode === 'paused') this.setMode('playing');
     else if (this.mode !== 'loading') this.settingsOpen = !this.settingsOpen;
+  }
+
+  /** HOME (pause panel and results): leave the night and return to the title screen. */
+  private goHome(): void {
+    if (this.mode !== 'paused' && this.mode !== 'over') return;
+    this.audio.uiTick();
+    // A fresh river behind the title, with nothing left over from the night just ended.
+    this.startRun();
+    this.setMode('title');
   }
 
   /** The panel's RESUME / CLOSE button. */
@@ -1149,10 +1159,11 @@ export class Game {
       const tw = v.label(id, on ? str : '', cx, y, color, 'center');
       v.panel(`${id}-strip`, cx - Math.ceil(tw / 2) - 3, y - 2, tw + 6, 11, on ? '#030911' : null, 11);
     };
-    const button = (name: 'start' | 'resume' | 'retry', on: boolean, str: string, y: number): void => {
-      const tw = v.label(`btn-${name}-text`, on ? str : '', cx, y + 6, '#ffd98a', 'center');
+    // `dx` moves the button's centre off the middle (two buttons side by side).
+    const button = (name: 'start' | 'resume' | 'retry' | 'home', on: boolean, str: string, y: number, dx = 0): void => {
+      const tw = v.label(`btn-${name}-text`, on ? str : '', cx + dx, y + 6, '#ffd98a', 'center');
       const w = tw + 16;
-      const x = cx - Math.ceil(w / 2);
+      const x = cx + dx - Math.ceil(w / 2);
       v.panel(`btn-${name}-edge`, x - 1, y - 1, w + 2, 22, on ? '#030911' : null, 12);
       v.panel(`btn-${name}-body`, x, y, w, 20, on ? '#604336' : null, 13);
       v.panel(`btn-${name}-lip`, x, y, w, 1, on ? '#a0977a' : null, 14);
@@ -1181,7 +1192,8 @@ export class Game {
     // Heading and close button stay put; the settings list scrolls in the window below them.
     const headY = Math.max(at(0.06), safe.top + size + 6);
     heading('paused-title', mix, paused ? 'PAUSED' : 'SOUND', headY, '#8ff8ff');
-    button('resume', mix, paused ? 'RESUME' : 'CLOSE', headY + 21);
+    // Paused: RESUME and HOME side by side. Elsewhere the panel only needs CLOSE.
+    button('resume', mix, paused ? 'RESUME' : 'CLOSE', headY + 21, paused ? -30 : 0);
     if (mix) {
       const listY = headY + 21 + Math.max(24, Math.ceil(46 / t));
       const listX = cx - PANEL_WIDTH / 2;
@@ -1228,6 +1240,8 @@ export class Game {
       text(`over-line-${i}`, over && line !== undefined, line ?? '', at(0.22) + 30 + i * 11, i === 3 || i === 4 ? '#ffd98a' : '#99c8cd');
     }
     button('retry', over, 'FISH AGAIN', at(0.22) + 36 + lines.length * 11);
+    // HOME goes back to the title screen: beside RESUME when paused, under FISH AGAIN on the results.
+    button('home', paused || over, 'HOME', paused ? headY + 21 : at(0.22) + 66 + lines.length * 11, paused ? 32 : 0);
 
     // Settings (gear) and mute stay in the top-left corner, inside the safe area, on every screen:
     // title, play, pause, the win and the results. Each is drawn at least 44 CSS px square, so art,

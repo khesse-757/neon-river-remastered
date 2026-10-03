@@ -175,6 +175,21 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
 
   expect((await diag(page))?.renderer.calls ?? 999).toBeLessThanOrEqual(100);
 
+  // HOME, from the pause panel and from the results, goes back to the title screen; a new night starts from there.
+  if (mobile) await page.locator('#btn-settings').tap();
+  else await page.keyboard.press('Escape');
+  await expect.poll(() => mode(page)).toBe('paused');
+  await tap('#btn-home');
+  await expect.poll(() => mode(page)).toBe('title');
+  await expectCornerControls(page, 'title after home');
+  await tap('#btn-start');
+  await expect.poll(() => mode(page)).toBe('playing');
+  expect((await diag(page))?.caught).toBe(0);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('loss-eel'));
+  await expect.poll(() => mode(page)).toBe('over');
+  await tap('#btn-home');
+  await expect.poll(() => mode(page)).toBe('title');
+
   await testInfo.attach(`${testInfo.project.name}-play`, { body: await page.screenshot(), contentType: 'image/png' });
   expect(errors).toEqual([]);
 });

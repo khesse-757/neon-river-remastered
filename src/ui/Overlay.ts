@@ -1,6 +1,6 @@
 import type { LossCause } from '../sim/sim';
 
-export type ButtonName = 'start' | 'resume' | 'retry' | 'settings' | 'mute';
+export type ButtonName = 'start' | 'resume' | 'retry' | 'home' | 'settings' | 'mute';
 export type ControlName = ButtonName;
 
 export interface RunSummary {
@@ -38,7 +38,7 @@ export class Overlay {
   private texel = 2;
 
   constructor(handlers: OverlayHandlers) {
-    for (const name of ['start', 'resume', 'retry', 'settings', 'mute'] as const) {
+    for (const name of ['start', 'resume', 'retry', 'home', 'settings', 'mute'] as const) {
       const button = el<HTMLButtonElement>(`#btn-${name}`);
       button.addEventListener('click', (event) => {
         event.stopPropagation();
