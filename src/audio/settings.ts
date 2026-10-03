@@ -27,6 +27,9 @@ export interface AudioSettings {
   muted: boolean;
   /** Faders are slider positions 0..1. */
   master: number;
+  /** Weather has its own two faders, apart from Sounds: rain can be turned up to listen to on its own. */
+  rain: number;
+  thunder: number;
   volume: Record<Channel, number>;
   enabled: Record<Toggle, boolean>;
   instrument: Instrument;
@@ -48,6 +51,8 @@ export interface AudioSettings {
 export const DEFAULT_AUDIO: AudioSettings = {
   muted: false,
   master: 0.8,
+  rain: 0.7,
+  thunder: 0.7,
   volume: { music: 0.7, ambience: 0.7, sfx: 0.75, notes: 0.7, ui: 0.6 },
   // Fish Notes are off by default: a catch is a splash and a soft chime.
   enabled: { music: true, sfx: true, notes: false },
@@ -84,6 +89,8 @@ export function sanitizeAudio(raw: unknown): AudioSettings {
   const enabled = (typeof r.enabled === 'object' && r.enabled !== null ? r.enabled : {}) as Record<string, unknown>;
   out.muted = flag(r.muted, out.muted);
   out.master = unit(r.master, out.master);
+  out.rain = unit(r.rain, out.rain);
+  out.thunder = unit(r.thunder, out.thunder);
   for (const key of CHANNELS) out.volume[key] = unit(volume[key], out.volume[key]);
   for (const key of ['music', 'sfx', 'notes'] as const) out.enabled[key] = flag(enabled[key], out.enabled[key]);
   if (INSTRUMENTS.includes(r.instrument as Instrument)) out.instrument = r.instrument as Instrument;
