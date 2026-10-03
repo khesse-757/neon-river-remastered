@@ -1,9 +1,10 @@
 import { createRng } from '../sim/rng';
-import { degreeToHz, melodyNote, MISS_FALL, quantizeOnset } from './melody';
+import { DEFAULT_THEME, degreeToHz, melodyNote, missFall, quantizeOnset, themeById, type CueNote, type Theme } from './melody';
 
-export type Bus = 'music' | 'ambience' | 'sfx' | 'melody' | 'ui';
-/** The three sliders in settings. Melody and UI sounds follow the SFX slider. */
-export type VolumeKey = 'music' | 'ambience' | 'sfx';
+/** The four things a player can turn down or off, plus master mute. */
+export type Channel = 'music' | 'ambience' | 'notes' | 'sfx';
+export const CHANNELS: readonly Channel[] = ['music', 'ambience', 'notes', 'sfx'];
+export const CHANNEL_LABELS: Record<Channel, string> = { music: 'MUSIC', ambience: 'AMBIENCE', notes: 'FISH NOTES', sfx: 'SPLASHES' };
 
 const FILES: Record<string, string> = {
   net: 'audio/sfx/net.mp3',
@@ -21,52 +22,84 @@ const CHIME_HZ = 1760;
 /** The music loop: 80 BPM, 64 beats. */
 const MUSIC_BPM = 80;
 const MUSIC_SECONDS = 48;
-const EIGHTH = 60 / MUSIC_BPM / 2;
-/** Bus trims: relative levels of loudness-normalized assets, before the user's sliders. */
-const TRIM: Record<Bus, number> = { music: 0.5, ambience: 0.85, sfx: 0.7, melody: 0.62, ui: 0.25 };
-const DEFAULT_VOLUME: Record<VolumeKey, number> = { music: 0.7, ambience: 0.7, sfx: 0.8 };
-const SLIDER: Record<Bus, VolumeKey> = { music: 'music', ambience: 'ambience', sfx: 'sfx', melody: 'sfx', ui: 'sfx' };
+export const EIGHTH = 60 / MUSIC_BPM / 2;
+/** Channel trims: relative levels of loudness-normalized assets, before the player's sliders. */
+const TRIM: Record<Channel, number> = { music: 0.5, ambience: 0.85, notes: 0.7, sfx: 0.7 };
+const DEFAULT_VOLUME: Record<Channel, number> = { music: 0.7, ambience: 0.7, notes: 0.8, sfx: 0.75 };
 const STORE = 'neonriver2_audio';
+const THEME_STORE = 'neonriver2_theme';
+
+interface Saved {
+  muted?: boolean;
+  volume?: Partial<Record<Channel, number>>;
+  enabled?: Partial<Record<Channel, boolean>>;
+}
 
 /**
- * Web Audio mixer. Buses (music, ambience, SFX, melody, UI) feed a master EQ and a
- * compressor/limiter so nothing spikes or buries the melody. Files are generated offline,
- * loudness-normalized (scripts/normalize-audio.mjs) and committed; nothing here calls a service.
+ * Web Audio mixer. Four channels (music, ambience, fish notes, splashes/SFX) feed a master EQ and
+ * a compressor/limiter. Files are generated offline, loudness-normalized and committed; nothing
+ * here calls a service.
  */
 export class AudioBus {
   readonly errors: string[] = [];
+  theme: Theme;
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private readonly buses = new Map<Bus, GainNode>();
+  private readonly buses = new Map<Channel, GainNode>();
   private duck: GainNode | null = null;
+  private reverb: GainNode | null = null;
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly loops = new Map<'ambience' | 'music', AudioBufferSourceNode>();
+  private readonly cue = new Set<AudioScheduledSourceNode>();
   private wantLoops = false;
   private musicStart = 0;
   private muted = false;
-  private volume: Record<VolumeKey, number> = { ...DEFAULT_VOLUME };
+  private volume: Record<Channel, number> = { ...DEFAULT_VOLUME };
+  private enabled: Record<Channel, boolean> = { music: true, ambience: true, notes: true, sfx: true };
   private splashToggle = false;
   private readonly rng = createRng(0x5eed);
 
-  constructor() {
+  constructor(themeId?: string | null) {
+    let storedTheme: string | null = null;
     try {
-      const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}') as Partial<Record<VolumeKey | 'muted', number | boolean>>;
+      const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}') as Saved;
       this.muted = saved.muted === true;
-      for (const key of Object.keys(DEFAULT_VOLUME) as VolumeKey[]) {
-        const v = saved[key];
+      for (const key of CHANNELS) {
+        const v = saved.volume?.[key];
         if (typeof v === 'number' && v >= 0 && v <= 1) this.volume[key] = v;
+        if (saved.enabled?.[key] === false) this.enabled[key] = false;
       }
+      storedTheme = localStorage.getItem(THEME_STORE);
     } catch {
       /* storage unavailable or corrupt: keep defaults */
     }
+    this.theme = themeById(themeId ?? storedTheme ?? DEFAULT_THEME);
   }
 
   get isMuted(): boolean {
     return this.muted;
   }
 
-  getVolume(key: VolumeKey): number {
+  getVolume(key: Channel): number {
     return this.volume[key];
+  }
+
+  isEnabled(key: Channel): boolean {
+    return this.enabled[key];
+  }
+
+  get state(): string {
+    return this.ctx?.state ?? 'none';
+  }
+
+  /** Pick the leitmotif (from the ?audition page) and remember it. */
+  setTheme(id: string): void {
+    this.theme = themeById(id);
+    try {
+      localStorage.setItem(THEME_STORE, this.theme.id);
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   /** Call from a user gesture. Safe to call repeatedly. */
@@ -107,16 +140,34 @@ export class AudioBus {
       this.master.gain.value = this.muted ? 0 : 1;
       lowCut.connect(air).connect(presence).connect(comp).connect(limiter).connect(this.master).connect(ctx.destination);
 
-      for (const bus of Object.keys(TRIM) as Bus[]) {
+      for (const bus of CHANNELS) {
         const gain = ctx.createGain();
         gain.gain.value = this.busGain(bus);
         if (bus === 'music') {
-          // Music passes through a duck gain that dips under banners and stingers.
+          // Music passes through a duck gain that dips under stingers and the shock.
           this.duck = ctx.createGain();
           gain.connect(this.duck).connect(lowCut);
         } else gain.connect(lowCut);
         this.buses.set(bus, gain);
       }
+
+      // A light reverb send for the fish notes: a short synthetic room, darkened.
+      const impulse = ctx.createBuffer(2, Math.floor(ctx.sampleRate * 1.4), ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = impulse.getChannelData(ch);
+        let smooth = 0;
+        for (let i = 0; i < data.length; i++) {
+          const t = i / data.length;
+          smooth += ((this.rng.next() * 2 - 1) * (1 - t) ** 2.6 - smooth) * 0.35;
+          data[i] = smooth;
+        }
+      }
+      const convolver = ctx.createConvolver();
+      convolver.buffer = impulse;
+      this.reverb = ctx.createGain();
+      this.reverb.gain.value = 0.5;
+      const notes = this.buses.get('notes');
+      if (notes) this.reverb.connect(convolver).connect(notes);
       void this.loadAll();
     }
     if (this.ctx.state === 'suspended') await this.ctx.resume().catch(() => undefined);
@@ -128,10 +179,14 @@ export class AudioBus {
     this.save();
   }
 
-  setVolume(key: VolumeKey, value: number): void {
+  setVolume(key: Channel, value: number): void {
     this.volume[key] = Math.min(1, Math.max(0, value));
-    if (this.ctx) for (const [bus, gain] of this.buses) gain.gain.setTargetAtTime(this.busGain(bus), this.ctx.currentTime, 0.03);
-    this.save();
+    this.applyGains();
+  }
+
+  setEnabled(key: Channel, on: boolean): void {
+    this.enabled[key] = on;
+    this.applyGains();
   }
 
   /** Suspend while the tab is hidden so nothing keeps sounding or stacking. */
@@ -155,7 +210,7 @@ export class AudioBus {
     this.musicStart = 0;
   }
 
-  /** Dip the music under a banner or stinger, then let it back up. */
+  /** Dip the music under a stinger, then let it back up. */
   duckMusic(seconds = 1.4, depth = 0.45): void {
     if (!this.ctx || !this.duck) return;
     const t = this.ctx.currentTime;
@@ -164,47 +219,96 @@ export class AudioBus {
     this.duck.gain.setTargetAtTime(1, t + seconds, 0.35);
   }
 
-  /** Catch: splash, the net, and the next note of the streak melody (a chord for koi). */
+  /** Catch: splash and net on the SFX channel, the next melody note on the notes channel. */
   catch(streak: number, koi: boolean): void {
     this.splashToggle = !this.splashToggle;
     this.play(koi ? 'splash2' : this.splashToggle ? 'splash1' : 'splash2', 'sfx', koi ? 0.75 : 0.5, 0.94 + this.rng.next() * 0.12);
     this.play('net', 'sfx', 0.2);
     const { ctx } = this;
     if (!ctx) return;
-    const note = melodyNote(streak, koi);
+    const note = melodyNote(this.theme, streak, koi);
     const when = quantizeOnset(ctx.currentTime, this.musicStart, EIGHTH);
-    this.pluck(note.degree, 0.9, when);
-    note.harmony.forEach((degree, i) => this.pluck(degree, 0.42, when + 0.012 * (i + 1)));
+    this.voice(note.degree, 0.9, when);
+    note.harmony.forEach((degree, i) => this.voice(degree, 0.4, when + 0.012 * (i + 1)));
     if (note.chime) this.chime(note.degree + 5, 0.5, when);
   }
 
-  /** Miss: a soft falling resolution back to the tonic; the melody restarts at step 1. */
+  /** Miss: the motif's tail falls softly to the low tonic; the melody restarts at step 1. */
   miss(): void {
-    const { ctx } = this;
-    if (!ctx) return;
-    MISS_FALL.forEach((degree, i) => this.pluck(degree - 5, 0.3 - i * 0.05, ctx.currentTime + i * 0.16, 1400));
-  }
-
-  /** A single melody note, so the SFX slider can be set by ear. */
-  preview(): void {
-    if (this.ctx) this.pluck(3, 0.8, this.ctx.currentTime);
+    this.playCue(missFall(this.theme), 0.45, 0.8);
   }
 
   /** Soft tick on every spawn: the river's metronome. */
   spawn(): void {
-    this.tone(1320, 0.05, 0.5, 'sine', 'ui');
+    this.tone(1320, 0.05, 0.12, 'sine', 'sfx');
   }
 
-  /** Phase banner stinger: two chimes a fifth apart; ducks the music. */
-  banner(): void {
+  /** Title / run start: the leitmotif, stated once. */
+  startSting(): void {
+    this.duckMusic(2.4, 0.5);
+    this.playCue(this.theme.startSting, 1, 0.85, true);
+  }
+
+  /** Phase change: three notes of the motif. */
+  phaseSting(): void {
+    this.duckMusic(1.2, 0.6);
+    this.playCue(this.theme.phaseSting, 1, 0.7);
+  }
+
+  /** Win: the motif answered an octave up, ending on a held chord. */
+  winFanfare(): void {
+    this.duckMusic(7, 0.3);
+    this.playCue(this.theme.winFanfare, 1, 1, true, true);
+  }
+
+  /** Loss: the motif sinking to the low tonic. */
+  lossPhrase(): void {
+    this.playCue(this.theme.lossPhrase, 1.25, 0.8, true);
+  }
+
+  /** Audition: play `count` steps of the catch sequence as eighth notes. */
+  playSequence(theme: Theme, count = 32, offset = 0): void {
     const { ctx } = this;
     if (!ctx) return;
-    this.duckMusic();
-    this.chime(5, 0.55, ctx.currentTime);
-    this.chime(8, 0.4, ctx.currentTime + 0.18);
+    this.stopCue();
+    const start = ctx.currentTime + 0.06;
+    for (let i = 0; i < count; i++) {
+      const note = melodyNote(theme, offset + i + 1, false);
+      this.voice(note.degree, 0.9, start + i * EIGHTH, true);
+    }
   }
 
-  /** Eel warning crackle (also used, shorter, for near misses). */
+  playThemeCue(theme: Theme, kind: 'startSting' | 'phaseSting' | 'winFanfare' | 'lossPhrase'): void {
+    const previous = this.theme;
+    this.theme = theme;
+    this.stopCue();
+    if (kind === 'startSting') this.startSting();
+    else if (kind === 'phaseSting') this.phaseSting();
+    else if (kind === 'winFanfare') this.winFanfare();
+    else this.lossPhrase();
+    this.theme = previous;
+  }
+
+  /** Stop any sting, fanfare or audition sequence still sounding. */
+  stopCue(): void {
+    for (const source of this.cue) {
+      try {
+        source.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    this.cue.clear();
+  }
+
+  /** One note, so a channel's slider can be set by ear. */
+  preview(key: Channel): void {
+    if (!this.ctx) return;
+    if (key === 'notes') this.voice(3, 0.8, this.ctx.currentTime);
+    else if (key === 'sfx') this.play('splash1', 'sfx', 0.5);
+  }
+
+  /** Eel warning crackle (also used, shorter, for near misses and the frying basket). */
   crackle(length = 0.5, level = 0.3): void {
     const { ctx } = this;
     const bus = this.buses.get('sfx');
@@ -233,7 +337,7 @@ export class AudioBus {
     const { ctx } = this;
     const bus = this.buses.get('sfx');
     if (!ctx || !bus) return;
-    this.duckMusic(3, 0.15);
+    this.duckMusic(3.5, 0.12);
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(660, ctx.currentTime);
@@ -250,14 +354,41 @@ export class AudioBus {
     this.crackle(0.9, 0.4);
   }
 
-  private busGain(bus: Bus): number {
+  /** The basket frying: a longer sizzle under the crackle. */
+  fry(): void {
+    const { ctx } = this;
+    const bus = this.buses.get('sfx');
+    if (!ctx || !bus) return;
+    const length = 1.2;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * length), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (this.rng.next() * 2 - 1) * (1 - i / data.length) ** 1.5;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 3800;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.16;
+    source.connect(filter).connect(gain).connect(bus);
+    source.start();
+    this.crackle(1.0, 0.3);
+  }
+
+  private busGain(bus: Channel): number {
     // Sliders are perceptual: square the 0..1 position.
-    return TRIM[bus] * this.volume[SLIDER[bus]] ** 2 * 1.6;
+    return this.enabled[bus] ? TRIM[bus] * this.volume[bus] ** 2 * 1.6 : 0;
+  }
+
+  private applyGains(): void {
+    if (this.ctx) for (const [bus, gain] of this.buses) gain.gain.setTargetAtTime(this.busGain(bus), this.ctx.currentTime, 0.03);
+    this.save();
   }
 
   private save(): void {
     try {
-      localStorage.setItem(STORE, JSON.stringify({ ...this.volume, muted: this.muted }));
+      const saved: Saved = { muted: this.muted, volume: this.volume, enabled: this.enabled };
+      localStorage.setItem(STORE, JSON.stringify(saved));
     } catch {
       /* storage unavailable */
     }
@@ -302,7 +433,7 @@ export class AudioBus {
     this.loops.set(id, source);
   }
 
-  private play(id: string, bus: Bus, volume: number, rate = 1, when = 0): void {
+  private play(id: string, bus: Channel, volume: number, rate = 1, when = 0): void {
     const buffer = this.buffers.get(id);
     const out = this.buses.get(bus);
     if (!this.ctx || !buffer || !out) return;
@@ -315,19 +446,53 @@ export class AudioBus {
     source.start(when);
   }
 
-  /** One koto note: the sampled pluck repitched, or a synthesized string if the sample is missing. */
-  private pluck(degree: number, volume: number, when: number, cutoff = 5200): void {
+  /** Play a rhythmic cue (sting, fanfare, phrase). `stretch` slows it; `hold` lets the last notes ring. */
+  private playCue(notes: readonly CueNote[], stretch: number, level: number, pad = false, hold = false): void {
     const { ctx } = this;
-    const out = this.buses.get('melody');
+    if (!ctx) return;
+    // Start on the music's next eighth so the cue sits in time.
+    const now = ctx.currentTime + 0.03;
+    const start = this.musicStart > 0 ? this.musicStart + Math.ceil((now - this.musicStart) / EIGHTH) * EIGHTH : now;
+    const last = Math.max(...notes.map((n) => n.at));
+    for (const note of notes) {
+      const when = start + note.at * EIGHTH * stretch;
+      this.voice(note.degree, (note.level ?? 0.85) * level, when, true, hold && note.at === last ? 2.6 : 1);
+    }
+    if (pad) this.pad(notes[0]?.degree ?? 0, start, (last + 6) * EIGHTH * stretch, 0.1 * level);
+  }
+
+  /**
+   * The melody voice: the koto pluck with its harsh top rolled off, a mallet-like sine body for
+   * warmth, a soft octave below, and a little reverb. Falls back to a synthesized string.
+   */
+  private voice(degree: number, volume: number, when: number, track = false, ring = 1): void {
+    const { ctx } = this;
+    const out = this.buses.get('notes');
     if (!ctx || !out) return;
     const hz = degreeToHz(degree);
+    const mix = ctx.createGain();
+    mix.gain.value = volume;
+    mix.connect(out);
+    if (this.reverb) {
+      const send = ctx.createGain();
+      send.gain.value = 0.22;
+      mix.connect(send).connect(this.reverb);
+    }
+    const keep = (node: AudioScheduledSourceNode): void => {
+      if (!track) return;
+      this.cue.add(node);
+      node.onended = () => this.cue.delete(node);
+    };
+
+    // Pluck (attack and character), low-passed.
     const tone = ctx.createBiquadFilter();
     tone.type = 'lowpass';
-    tone.frequency.value = cutoff;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(volume, when);
-    gain.gain.setTargetAtTime(0, when + 0.9, 0.25);
-    tone.connect(gain).connect(out);
+    tone.frequency.value = Math.min(3400, hz * 5);
+    tone.Q.value = 0.5;
+    const pluckGain = ctx.createGain();
+    pluckGain.gain.setValueAtTime(0.75, when);
+    pluckGain.gain.setTargetAtTime(0, when + 0.5 * ring, 0.3 * ring);
+    tone.connect(pluckGain).connect(mix);
     const sample = this.buffers.get('koto');
     if (sample) {
       const source = ctx.createBufferSource();
@@ -335,30 +500,77 @@ export class AudioBus {
       source.playbackRate.value = hz / KOTO_HZ;
       source.connect(tone);
       source.start(when);
-      source.stop(when + 2.2);
-      return;
+      source.stop(when + 2.4 * ring);
+      keep(source);
+    } else {
+      const period = Math.max(2, Math.round(ctx.sampleRate / hz));
+      const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 1.2), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      const pick = Math.max(1, Math.round(period * 0.18));
+      for (let i = 0; i < period; i++) data[i] = this.rng.next() * 2 - 1;
+      for (let i = period - 1; i >= pick; i--) data[i] = (data[i] ?? 0) - (data[i - pick] ?? 0);
+      for (let i = period; i < data.length; i++) data[i] = ((data[i - period] ?? 0) + (data[i - period + 1] ?? 0)) * 0.5 * 0.995;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(tone);
+      source.start(when);
+      keep(source);
     }
-    // Fallback string: Karplus-Strong with a pick-position comb, for a koto-like bite.
-    const period = Math.max(2, Math.round(ctx.sampleRate / hz));
-    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 1.2), ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    const pick = Math.max(1, Math.round(period * 0.18));
-    for (let i = 0; i < period; i++) data[i] = this.rng.next() * 2 - 1;
-    for (let i = period - 1; i >= pick; i--) data[i] = (data[i] ?? 0) - (data[i - pick] ?? 0);
-    for (let i = period; i < data.length; i++) data[i] = ((data[i - period] ?? 0) + (data[i - period + 1] ?? 0)) * 0.5 * 0.995;
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(tone);
-    source.start(when);
+
+    // Body: a kalimba-like sine at the fundamental with a quick overtone ping.
+    const partial = (ratio: number, level: number, decay: number): void => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = hz * ratio;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, when);
+      gain.gain.linearRampToValueAtTime(level, when + 0.006);
+      gain.gain.setTargetAtTime(0, when + 0.02, decay * ring);
+      osc.connect(gain).connect(mix);
+      osc.start(when);
+      osc.stop(when + 0.1 + decay * 6 * ring);
+      keep(osc);
+    };
+    partial(1, 0.5, 0.28);
+    partial(4, 0.1, 0.05);
+    // Support an octave below, soft and slow.
+    partial(0.5, 0.2, 0.4);
+  }
+
+  /** A soft sustained fifth under a sting or fanfare. */
+  private pad(degree: number, when: number, length: number, level: number): void {
+    const { ctx } = this;
+    const out = this.buses.get('notes');
+    if (!ctx || !out) return;
+    for (const [d, l] of [
+      [degree - 5, 1],
+      [degree - 2, 0.6],
+    ] as const) {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = degreeToHz(d);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 900;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, when);
+      gain.gain.linearRampToValueAtTime(level * l, when + 0.4);
+      gain.gain.setTargetAtTime(0, when + length, 0.5);
+      osc.connect(filter).connect(gain).connect(out);
+      osc.start(when);
+      osc.stop(when + length + 3);
+      this.cue.add(osc);
+      osc.onended = () => this.cue.delete(osc);
+    }
   }
 
   private chime(degree: number, volume: number, when: number): void {
     const sample = this.buffers.get('chime');
-    if (sample) this.play('chime', 'melody', volume * 0.6, Math.min(2, Math.max(0.5, degreeToHz(degree + 5) / CHIME_HZ)), when);
-    else this.tone(degreeToHz(degree + 10), 0.9, volume * 0.25, 'sine', 'melody', when);
+    if (sample) this.play('chime', 'notes', volume * 0.45, Math.min(2, Math.max(0.5, degreeToHz(degree + 5) / CHIME_HZ)), when);
+    else this.tone(degreeToHz(degree + 10), 0.9, volume * 0.2, 'sine', 'notes', when);
   }
 
-  private tone(hz: number, length: number, volume: number, type: OscillatorType, bus: Bus, when = 0): void {
+  private tone(hz: number, length: number, volume: number, type: OscillatorType, bus: Channel, when = 0): void {
     const { ctx } = this;
     const out = this.buses.get(bus);
     if (!ctx || !out) return;

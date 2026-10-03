@@ -20,6 +20,9 @@ interface ThreeGameDiagnostics {
   canvas: { clientWidth: number; clientHeight: number; width: number; height: number; dpr: number };
   layout: { scale: number; targetW: number; targetH: number; gridW: number; gridH: number; pixelsPerTexel: number };
   quality: number;
+  winning: boolean;
+  audio: string;
+  theme: string;
   rippleEncoding: string;
 }
 
@@ -36,6 +39,8 @@ interface ThreeGameTestHooks {
   hideDebugUi(hidden: boolean): void | Promise<void>;
   /** Let the built-in fish tracker drive the net (smoke tests, captures). */
   setAutoplay(enabled: boolean): void;
+  /** Drop a fish just upstream of the net (video capture of the eel sequence). */
+  spawnAtNet(kind: 'bluegill' | 'koi' | 'eel'): void;
 }
 
 interface Window {

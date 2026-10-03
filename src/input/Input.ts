@@ -5,6 +5,10 @@ export interface InputOptions {
   readonly rail: () => { left: number; right: number };
   readonly onPause: () => void;
   readonly onConfirm: () => void;
+  /** Space: pause/resume in play, confirm on menus. */
+  readonly onSpace: () => void;
+  /** Any press on the play surface (used to skip the win sequence). */
+  readonly onTap: () => void;
   readonly onFirstGesture: () => void;
 }
 
@@ -49,6 +53,9 @@ export class Input {
         if (PAUSE_KEYS.has(e.code)) {
           this.options.onPause();
           e.preventDefault();
+        } else if (e.code === 'Space' && e.target.type === 'range') {
+          this.options.onSpace();
+          e.preventDefault();
         }
         return;
       }
@@ -59,7 +66,11 @@ export class Input {
       } else if (PAUSE_KEYS.has(e.code)) {
         this.options.onPause();
         e.preventDefault();
-      } else if (e.code === 'Enter' || e.code === 'Space') {
+      } else if (e.code === 'Space') {
+        // Space only ever pauses or resumes during play; it never activates a focused control.
+        this.options.onSpace();
+        e.preventDefault();
+      } else if (e.code === 'Enter') {
         // Buttons handle their own activation; only bare presses start or resume.
         if (!(e.target instanceof HTMLButtonElement)) {
           this.options.onConfirm();
@@ -74,6 +85,7 @@ export class Input {
       'pointerdown',
       (e) => {
         this.gesture();
+        this.options.onTap();
         if (e.pointerType === 'mouse') return;
         // The newest finger takes over, so handing off between thumbs never drops input.
         this.touchId = e.pointerId;

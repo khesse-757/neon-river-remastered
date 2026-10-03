@@ -37,6 +37,10 @@ export interface FrameView {
   readonly airFish: readonly FishInstance[];
   readonly net: { x: number; z: number; velocity: number; lift: number; bulge: number; charge: number; visible: boolean };
   readonly basketFill: number;
+  /** 0..1: the catch chars after an eel. */
+  readonly basketFry: number;
+  /** 0..1: the catch glows gold on a win. */
+  readonly basketGlow: number;
   readonly waterLights: readonly WaterLight[];
   /** Brightest eels near the net, for real point lights on the props. */
   readonly eelLights: readonly { x: number; z: number; intensity: number }[];
@@ -118,6 +122,7 @@ export class SceneRenderer {
   private readonly lanternLight: THREE.PointLight;
   private readonly eelLights: THREE.PointLight[] = [];
   private readonly moon: THREE.DirectionalLight;
+  private readonly winLight: THREE.PointLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly neonFill: THREE.DirectionalLight;
   private readonly fogBase = color('#063152');
@@ -157,6 +162,7 @@ export class SceneRenderer {
     this.camera.position.set(0, cam.height, 0);
     this.camera.rotation.set(-river.camera.pitch, 0, 0);
     this.camera.layers.enableAll();
+    this.camera.updateMatrixWorld(true);
 
     for (let i = 0; i < WATER_LIGHTS; i++) {
       this.waterLights.push(new THREE.Vector4(0, 0, 1, 0));
@@ -267,6 +273,15 @@ export class SceneRenderer {
     this.basket = new BasketProp(assets.ramp, 0.052, LAYER_BRIDGE);
     this.basket.root.position.copy(place(382, 1262, 0.1));
     this.actors.add(this.lantern.root, this.basket.root);
+    // Gold light from the full basket on a win.
+    this.winLight = new THREE.PointLight(color('#ffcf5a'), 0, 0.8, 2);
+    this.winLight.position.copy(this.basket.root.position).add(new THREE.Vector3(0, 0.08, 0));
+    this.winLight.layers.enableAll();
+    this.actors.add(this.winLight);
+    // The moon's direction as the fixed camera sees it, for the fish's stepped highlights.
+    const moonView = new THREE.Vector3(moonDir.x, moonDir.y, -moonDir.z).transformDirection(this.camera.matrixWorldInverse);
+    this.fish.moonView.value.copy(moonView);
+    this.airFish.moonView.value.copy(moonView);
 
     this.fishermanMaterial = new THREE.ShaderMaterial({
       vertexShader: GLSL.QUAD_VERT,
@@ -414,6 +429,44 @@ export class SceneRenderer {
     return rect.z;
   }
 
+  /** A small pixel icon from rows of '#' and '.', placed in target texels. */
+  icon(id: string, rows: readonly string[] | null, x: number, y: number, hex = '#ffffff'): void {
+    let item = this.ui.get(id);
+    if (!rows) {
+      if (item) item.mesh.visible = false;
+      return;
+    }
+    const key = `${rows.join('/')}|${hex}`;
+    if (!item) {
+      const material = this.quadMaterial(this.white, false);
+      const mesh = new THREE.Mesh(this.quad01, material);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 21;
+      this.uiScene.add(mesh);
+      item = { mesh, material, text: '' };
+      this.ui.set(id, item);
+    }
+    if (item.text !== key) {
+      const w = rows[0]?.length ?? 1;
+      const data = new Uint8Array(w * rows.length * 4);
+      const [r, g, b] = hexToRgb(hex);
+      rows.forEach((row, yy) => {
+        for (let xx = 0; xx < w; xx++) if (row[xx] === '#') data.set([r, g, b, 255], (yy * w + xx) * 4);
+      });
+      const old = item.material.uniforms.uMap!.value as THREE.Texture;
+      if (old !== this.white) old.dispose();
+      const texture = new THREE.DataTexture(data, w, rows.length, THREE.RGBAFormat);
+      texture.needsUpdate = true;
+      item.material.uniforms.uMap!.value = texture;
+      (item.material.uniforms.uRect!.value as THREE.Vector4).set(0, 0, w, rows.length);
+      item.text = key;
+    }
+    const rect = item.material.uniforms.uRect!.value as THREE.Vector4;
+    rect.x = Math.round(x);
+    rect.y = Math.round(y);
+    item.mesh.visible = true;
+  }
+
   /** Flat rectangle in target texels (HUD tablet, banner board, buttons). */
   panel(id: string, x: number, y: number, w: number, h: number, hex: string | null, order = 10): void {
     let item = this.ui.get(id);
@@ -478,7 +531,10 @@ export class SceneRenderer {
     this.net.root.visible = view.net.visible;
     this.hoop.set(view.net.x, -this.net.radius * 0.12, -view.net.z);
     this.net.update(this.hoop, this.grip, view.net.velocity, view.net.lift, view.net.bulge, view.dt, view.net.charge);
-    this.basket.update(view.basketFill, view.dt);
+    this.basket.update(view.basketFill, view.dt, view.time, view.basketFry, view.basketGlow);
+    this.winLight.intensity = 0.035 * view.basketGlow;
+    this.fish.time.value = view.time;
+    this.airFish.time.value = view.time;
 
     const man = this.fishermanMaterial.uniforms;
     man.uBreath!.value = view.breath;

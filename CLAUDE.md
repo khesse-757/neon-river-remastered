@@ -105,11 +105,14 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
   200 lb and the pace curve (median lb at 15…180 s), and writes `artifacts/playtest.json`
 
 Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
-`phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `koi-scoop`, `eel-near`,
-`loss-eel`, `loss-escaped`.
+`phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `settings`, `koi-scoop`,
+`eel-near`, `eel-basket`, `win`, `win-results`, `loss-eel`, `loss-escaped`.
+Dev pages: `?tune` (live pace multipliers + copy values), `?audition` (three leitmotif candidates;
+`?theme=lantern|heron|ripple` selects one).
 Look-dev URL params: `?actors=device` (3D layer at full device pixels; default caps it near DPR 2), `?actors=3x`,
 `?grid=192x344|216x387|256x459|384x688`, `?ripple=byte`, `?seed=N`.
 
 - `node scripts/record.mjs --url http://127.0.0.1:4188 --out <dir>` — 9 s active-play videos on both
-  viewports plus fps / draw-call stats (run against `npm run preview` for performance numbers)
+  viewports plus fps / draw-call stats; `--clip full` records a whole bot-played night to the win,
+  `--clip eel` the eel shock and frying basket (run against `npm run preview` for performance numbers)
 - `node scripts/normalize-audio.mjs` — loudness-normalize `assets-src/audio/*` into `public/audio/` (needs ffmpeg)

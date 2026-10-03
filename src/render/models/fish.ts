@@ -195,7 +195,7 @@ const KOI: Species = {
     );
   },
   wave: { k: 6.5, amp: 0.12, head: 0.1 },
-  glow: color('#ffb347'),
+  glow: color('#ffb347').multiplyScalar(1.5),
 };
 
 const EEL: Species = {
@@ -225,7 +225,14 @@ const EEL: Species = {
     );
   },
   wave: { k: 8.5, amp: 0.06, head: 0.4 },
-  glow: color('#39e6ee'),
+  glow: color('#39e6ee').multiplyScalar(0.87),
+};
+
+/** Highlight tint and sparkle strength per species: silver-blue, gold, and a faint cold sheen. */
+const SHEEN: Record<FishKind, THREE.Vector4> = {
+  bluegill: new THREE.Vector4(0.42, 0.62, 0.7, 0.55),
+  koi: new THREE.Vector4(0.95, 0.62, 0.2, 0.9),
+  eel: new THREE.Vector4(0.1, 0.3, 0.36, 0.3),
 };
 
 const SPECIES: Record<FishKind, Species> = { bluegill: BLUEGILL, koi: KOI, eel: EEL };
@@ -347,6 +354,10 @@ export class FishSchool {
   private readonly scaleV = new THREE.Vector3();
   private readonly posV = new THREE.Vector3();
 
+  /** Moon direction in view space (the camera never turns), and a clock for scale sparkle. */
+  readonly moonView = { value: new THREE.Vector3(0, 1, 0) };
+  readonly time = { value: 0 };
+
   constructor(ramp: THREE.Texture, fogColor: THREE.Color, layer: number) {
     const meshes = {} as Record<FishKind, THREE.InstancedMesh>;
     const params = {} as Record<FishKind, THREE.InstancedBufferAttribute>;
@@ -365,9 +376,12 @@ export class FishSchool {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uFog = { value: fogColor };
         shader.uniforms.uGlow = { value: spec.glow };
+        shader.uniforms.uMoonView = this.moonView;
+        shader.uniforms.uTime = this.time;
+        shader.uniforms.uSheen = { value: SHEEN[kind] };
         shader.uniforms.uWave = { value: new THREE.Vector3(spec.wave.k, spec.wave.amp * spec.length, spec.wave.head) };
         shader.vertexShader =
-          'attribute float aBody;\nattribute float aEmit;\nattribute vec4 iSwim;\nattribute vec4 iLook;\nuniform vec3 uWave;\nvarying vec4 vLook;\nvarying float vEmit;\n' +
+          'attribute float aBody;\nattribute float aEmit;\nattribute vec4 iSwim;\nattribute vec4 iLook;\nuniform vec3 uWave;\nvarying vec4 vLook;\nvarying float vEmit;\nvarying vec2 vScale;\n' +
           shader.vertexShader.replace(
             '#include <begin_vertex>',
             `#include <begin_vertex>
@@ -375,23 +389,35 @@ export class FishSchool {
              float swing = mix(uWave.z, 1.0, aBody * aBody);
              transformed.x += sin(iSwim.x - aBody * uWave.x) * uWave.y * swing * iSwim.y;
              vLook = iLook;
-             vEmit = aEmit;`,
+             vEmit = aEmit;
+             vScale = vec2(aBody * 46.0, atan(position.x, position.y) * 5.0);`,
           );
         shader.fragmentShader =
-          'uniform vec3 uFog;\nuniform vec3 uGlow;\nvarying vec4 vLook;\nvarying float vEmit;\n' +
+          'uniform vec3 uFog;\nuniform vec3 uGlow;\nuniform vec3 uMoonView;\nuniform float uTime;\nuniform vec4 uSheen;\nvarying vec4 vLook;\nvarying float vEmit;\nvarying vec2 vScale;\n' +
           shader.fragmentShader
             .replace(
               '#include <emissivemap_fragment>',
               `#include <emissivemap_fragment>
-               float rim = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
-               // Moonlit rim: keeps the silhouette readable against dark water without glowing.
+               vec3 nrm = normalize(normal);
+               vec3 eye = normalize(vViewPosition);
+               float rim = pow(1.0 - clamp(dot(nrm, eye), 0.0, 1.0), 3.0);
+               // Moonlit rim: keeps the silhouette readable against dark water.
                totalEmissiveRadiance += vec3(0.3, 0.5, 0.62) * step(0.5, rim) * 0.34;
+               // Luster: a stepped moon highlight along the wet back, and scales that catch the light.
+               float sp = pow(clamp(dot(nrm, normalize(uMoonView + eye)), 0.0, 1.0), 26.0);
+               float gloss = sp > 0.55 ? 1.0 : (sp > 0.22 ? 0.4 : 0.0);
+               float fleck = fract(sin(dot(floor(vScale), vec2(12.9898, 78.233)) + floor(uTime * 5.0) * 0.37) * 43758.5453);
+               float sparkle = step(0.965, fleck) * smoothstep(0.1, 0.6, sp + 0.25);
+               totalEmissiveRadiance += uSheen.rgb * (gloss * 0.5 + sparkle * uSheen.a);
                totalEmissiveRadiance += uGlow * vEmit * vLook.y;`,
             )
             .replace(
               '#include <opaque_fragment>',
               `#include <opaque_fragment>
                // Continuous depth fog: deeper fish sink into the river's color; no surface pop.
+               // Brightness discipline: a fish's own surface stays under the water's brightest glints;
+               // only self-light (eel stripes, koi gleam) may go above.
+               gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(0.74) + uGlow * vEmit * vLook.y);
                gl_FragColor.rgb = mix(gl_FragColor.rgb, uFog, vLook.x);
                gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.25), vLook.z);`,
             );

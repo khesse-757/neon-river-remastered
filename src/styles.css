@@ -89,6 +89,21 @@ body {
   touch-action: manipulation;
 }
 
+#overlay input[type='checkbox'] {
+  position: absolute;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+#overlay input[type='checkbox']:focus-visible {
+  opacity: 1;
+  appearance: none;
+  background: transparent;
+  outline: var(--texel) solid #8ff8ff;
+}
+
 #overlay input[type='range'] {
   position: absolute;
   margin: 0;

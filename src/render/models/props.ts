@@ -219,7 +219,14 @@ export class BasketProp {
   /** World position fish are tossed to. */
   readonly mouth = new THREE.Vector3();
   private readonly heap: THREE.InstancedMesh;
+  private readonly heapMaterial: THREE.MeshToonMaterial;
+  private readonly water: THREE.Mesh;
+  private readonly tints: THREE.Color[] = [];
+  private readonly rest: THREE.Matrix4[] = [];
+  private readonly char = color('#17110c');
+  private readonly gold = color('#ffcf5a');
   private shown = 0;
+  private fried = -1;
 
   constructor(
     ramp: THREE.Texture,
@@ -258,7 +265,26 @@ export class BasketProp {
     const rim = new THREE.Mesh(new THREE.TorusGeometry(size * 0.97, size * 0.07, 6, 20), toon(ramp, { color: color('#5a3f20') }));
     rim.rotation.x = Math.PI / 2;
     rim.position.y = size * 1.02;
-    this.root.add(body, base, rim);
+    // A soft contact shadow on the cobbles, and a little water in the bottom.
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(size * 1.35, 20),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.32, depthWrite: false }),
+    );
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.set(size * 0.12, size * 0.01, size * 0.1);
+    this.water = new THREE.Mesh(
+      new THREE.CircleGeometry(size * 0.78, 16),
+      new THREE.MeshToonMaterial({
+        gradientMap: ramp,
+        color: color('#2f6f86'),
+        transparent: true,
+        opacity: 0.55,
+        emissive: color('#16384a'),
+      }),
+    );
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.position.y = size * 0.1;
+    this.root.add(shadow, body, base, rim, this.water);
 
     // The catch: individual fish (body + tail) stacked in rings, revealed one by one as weight lands.
     const fishBody = new THREE.SphereGeometry(1, 8, 6);
@@ -279,7 +305,18 @@ export class BasketProp {
       }
       merged.setAttribute(name, new THREE.BufferAttribute(out, 3));
     }
-    this.heap = new THREE.InstancedMesh(merged, toon(ramp, {}), HEAP_FISH);
+    // Wet fish: a stepped highlight from whatever lights them (lantern, moon).
+    this.heapMaterial = toon(ramp, { emissive: color('#000000') });
+    this.heapMaterial.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+         float sheen = pow(clamp(dot(normalize(normal), normalize(normalize(vViewPosition) + vec3(-0.3, 0.8, 0.5))), 0.0, 1.0), 18.0);
+         totalEmissiveRadiance += vec3(0.55, 0.62, 0.6) * (sheen > 0.5 ? 0.5 : (sheen > 0.2 ? 0.18 : 0.0)) * diffuseColor.rgb * 2.0;`,
+      );
+    };
+    this.heapMaterial.customProgramCacheKey = () => 'basket-heap';
+    this.heap = new THREE.InstancedMesh(merged, this.heapMaterial, HEAP_FISH);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const tints = ['#9fd0cf', '#6fb0b8', '#b5ddd6', '#f08a24', '#84c2c4', '#ffc24a', '#5f9faa'];
@@ -295,7 +332,10 @@ export class BasketProp {
         new THREE.Vector3(1, 1, 1).multiplyScalar(size * 0.36),
       );
       this.heap.setMatrixAt(i, m);
-      this.heap.setColorAt(i, color(tints[i % tints.length] ?? '#9fd0cf'));
+      this.rest.push(m.clone());
+      const tint = color(tints[i % tints.length] ?? '#9fd0cf');
+      this.tints.push(tint);
+      this.heap.setColorAt(i, tint);
     }
     this.heap.count = 0;
     this.heap.frustumCulled = false;
@@ -303,13 +343,47 @@ export class BasketProp {
     this.root.traverse((o) => o.layers.set(layer));
   }
 
-  /** fill 0..1 = landed weight toward the goal. Fish appear one at a time, so the heap grows. */
-  update(fill: number, dt: number): void {
+  /**
+   * fill 0..1 = landed weight toward the goal (fish appear one at a time, so the heap grows).
+   * `fry` 0..1 chars the catch after an eel; `glow` 0..1 turns it gold on a win.
+   */
+  update(fill: number, dt: number, time = 0, fry = 0, glow = 0): void {
     this.shown += (fill - this.shown) * (1 - Math.exp(-6 * dt));
-    this.heap.count = this.shown > 0.002 ? Math.min(HEAP_FISH, 1 + Math.floor(this.shown * (HEAP_FISH - 1) + 0.5)) : 0;
+    const count = this.shown > 0.002 ? Math.min(HEAP_FISH, 1 + Math.floor(this.shown * (HEAP_FISH - 1) + 0.5)) : 0;
+    this.heap.count = count;
+    this.water.visible = count > 0;
+    // Now and then the top fish gives a flop.
+    if (count > 0) {
+      const top = count - 1;
+      const beat = (time * 0.6) % 4;
+      const kick = fry > 0 ? Math.sin(time * 40) * 0.25 * (1 - fry) : beat < 0.35 ? Math.sin((beat / 0.35) * Math.PI * 3) * 0.5 : 0;
+      const m = this.scratch.copy(this.rest[top] as THREE.Matrix4).multiply(this.spin.makeRotationX(kick));
+      this.heap.setMatrixAt(top, m);
+      this.heap.instanceMatrix.needsUpdate = true;
+    }
+    const state = Math.round(fry * 20) + Math.round(glow * 20) * 100;
+    if (state !== this.fried) {
+      this.fried = state;
+      this.tints.forEach((tint, i) =>
+        this.heap.setColorAt(
+          i,
+          this.mixed
+            .copy(tint)
+            .lerp(this.char, fry * 0.92)
+            .lerp(this.gold, glow * 0.7),
+        ),
+      );
+      if (this.heap.instanceColor) this.heap.instanceColor.needsUpdate = true;
+      // Gold, but under the bloom threshold: it should read as a glowing catch, not a lamp.
+      this.heapMaterial.emissive.copy(this.gold).multiplyScalar(glow * 0.42);
+    }
     this.root.updateMatrixWorld(true);
     this.mouth.set(0, this.size * 1.2, 0).applyMatrix4(this.root.matrixWorld);
   }
+
+  private readonly scratch = new THREE.Matrix4();
+  private readonly spin = new THREE.Matrix4();
+  private readonly mixed = new THREE.Color();
 }
 
 const HEAP_FISH = 30;

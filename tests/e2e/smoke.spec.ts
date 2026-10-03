@@ -67,7 +67,7 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setAutoplay(false));
 
   // Pause and resume.
-  if (mobile) await page.locator('#btn-pause').tap();
+  if (mobile) await page.locator('#btn-settings').tap();
   else await page.keyboard.press('Escape');
   await expect.poll(() => mode(page)).toBe('paused');
   const frozenAt = (await diag(page))?.elapsed;
@@ -76,6 +76,14 @@ test('boots, plays through real input, loses to an eel, and retries', async ({ p
   if (mobile) await page.locator('#btn-resume').tap();
   else await page.keyboard.press('Escape');
   await expect.poll(() => mode(page)).toBe('playing');
+
+  // Space pauses and resumes, and nothing else, during play.
+  if (!mobile) {
+    await page.keyboard.press('Space');
+    await expect.poll(() => mode(page)).toBe('paused');
+    await page.keyboard.press('Space');
+    await expect.poll(() => mode(page)).toBe('playing');
+  }
 
   // One eel ends the night; retry is one tap.
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setState('loss-eel'));

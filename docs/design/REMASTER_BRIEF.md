@@ -41,8 +41,8 @@ miss spends the 20-lb budget; an eel ends the night. Restart is one tap.
 
 - Every 1–3 s: pick the next fish in the chain, slide, scoop.
 - Every 10–20 s: a new phase with a new pattern, announced and breathed into.
-- Across 2.5–3.5 min: the night changes (rain, storm, moonrise) as the run
-  escalates; the HUD and world both show progress toward 200.
+- Across ~2:15: the night changes (rain, storm, moonrise) as the run
+  escalates; the basket and HUD both show progress toward 200.
 - A better player: reads the chain early, lets low-value fish go during
   zigzags, threads between eels for koi, keeps long streaks.
 
@@ -75,39 +75,53 @@ Read `ORIGINAL_FISHING_DESIGN.md` first. Implement:
   bend; eels announce ~0.6 s early with a crackle sound and a blue under-glow
   at the emitter.
 
-### 3.3 Phase script — "One Night on the River"
-Starting values. `sweep` in river-widths/s; `travel` = seconds from appearing
-at the far bend to the net. Tune with the bot playtest; record changes.
+### 3.3 Pace — "One Night on the River"
 
-| # | Name (banner) | Length | Sweep | Swing | Period | Travel | Eel | Koi | Teaches | World beat |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Still Water | 10 s | 0.6 | 0.5–2 s | 0.70 | 4.2 s | 0 | 10% | trace the chain | fireflies, calm |
-| 2 | First Spark | 10 s | 0.6 | 0.5–2 s | 0.70 | 4.0 s | 20% | 10% | eels exist; first eel gets a gentle highlight | neon flickers |
-| 3 | Lantern Koi | 8 s | 3.0 | 0.5–2 s | 0.65 | 3.8 s | 10% | 25% | zigzag; choose the koi | lantern glow swells |
-| 4 | Twin Banks | 9 s | pinned, alternating every 3 s | — | 0.60 | 3.8 s | 0 | 25% | long traversals | bonanza sparkle |
-| 5 | Rising Tide | 12 s | 0.6 → 1.2 | 0.5–2 s | 0.50 | 3.4 s | 10% | 10% | density | rain begins |
-| 6 | Neon Rapids | 12 s | 3.0 | 0.5–2 s | 0.45 | 3.1 s | 10% | 10% | dense zigzag | heavier rain, city reflections sharpen |
-| 7 | Eel Storm | 10 s | 3.0 | 0.5–2 s | 0.50 | 3.0 s | 80% | 10% | thread through eels | lightning, thunder |
-| 8 | Braided Stream | 12 s | two emitters in counter-phase, 1.0 | 0.5–2 s | 0.50 each | 3.0 s | 10% | 10% | combine weave + choice | storm breaks |
-| 9 | Moonrise | until 200 lb | 0.8 | 0.5–2 s | 0.35 | 2.8 s | 10% | 10% | everything | rain stops, moon path on water |
+The run starts lively and keeps getting faster and harder the whole way. Two
+layers set the pace (all numbers live in `src/sim/config.ts`; tune with the
+playtester and the dev `?tune` panel, and record changes):
 
-**Weight budget rule:** the script must be budgeted so a *perfect* player
-reaches Moonrise with roughly 160–190 lb. Nobody who wins skips the Eel Storm.
-(Rough math with the values above: ≈20, 37, 60, 90, 121, 147, 159, 190 lb
-cumulative for near-perfect play.) Verify with the oracle bot and retune.
+**Continuous ramp.** Progress 0→1 on whichever is further along: elapsed time
+over 135 s, or weight caught over 200 lb.
 
-- 2-second **rest** between phases (no spawns, banner + breath).
-- If 200 lb is reached early, jump to the win. If Moonrise runs long, it cycles
-  phases 6–8 variants.
-- Target: a solid player wins in **2.5–3.5 min**; first-time players often lose
-  first around phases 6–7 and want to retry.
-- **Assist ("the river calms"):** after a loss, next attempt uses a gentler
-  table (+15% period, +10% travel, −30% eel), stacking up to 3 times; a win
-  resets. On by default, toggle in settings, never shown as a penalty.
-- **Endless "Hard River"** unlocked after the first win, or on the title screen
-  with ←←→→←←→→ then Enter (swipe pattern on touch). Uses tighter numbers
-  (period down to 0.15 s, travel 2.4 s), score = weight caught before 20 lb
-  missed or an eel.
+| | Start | End |
+| --- | --- | --- |
+| Fish travel time (far bend → net) | 3.0 s | 1.9 s |
+| Spawn period | 0.62 s | 0.42 s |
+| Emitter sweep | 0.8 widths/s | 3.0 widths/s |
+
+**Phases** shape the pattern on top of the ramp with multipliers and the
+eel/koi mix. One emitter for now; the second emitter for Braided Stream is Gate 2.
+
+| # | Name (banner) | Length | Sweep × | Period × | Eel | Koi | Pattern |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Still Water | 11 s | 0.8 | 1 | 22% | 3% | trace the chain; first eels |
+| 2 | First Spark | 12 s | 1 | 1 | 34% | 4% | eels in the chain |
+| 3 | Lantern Koi | 10 s | 1.6 | 1.25 | 25% | 14% | zigzag; choose the koi |
+| 4 | Twin Banks | 9 s | pinned, alternating every 3 s | 1.2 | 20% | 8% | long traversals |
+| 5 | Rising Tide | 14 s | 1 | 0.92 | 36% | 4% | density |
+| 6 | Neon Rapids | 14 s | 1.4 | 1 | 38% | 4% | dense zigzag |
+| 7 | Eel Storm | 10 s | 1 | 0.9 | 66% | 10% | thread through eels |
+| 8 | Braided Stream | 12 s | 1.3, quick reversals | 1 | 43% | 5% | weave |
+| 9 | Moonrise | 16 s | 1 | 1 | 46% | 6% | everything |
+
+After Moonrise the script loops phases 6–9 until the run ends.
+
+- **No calm opener:** a run starts with fish already in the river; the first one
+  reaches the net at about 1.7 s.
+- **Rests are 0.75 s**; the phase banner shows for 1.6 s and spawning resumes under it.
+- **Pace targets for a solid player:** ~50 lb by 0:40, ~100 lb by 1:15, 200 lb by ~2:15.
+- **Why the eel share is high and the period stops at 0.42 s:** only 20 lb may
+  escape, so the weight spawned by any moment is, within 20 lb, the weight a
+  winner has caught by then. The pace targets therefore fix the spawned weight
+  at about 1.4–2 lb/s. Extra liveliness has to come from speed, sweep and eels
+  (which weigh nothing), not from more catchable fish. A period of 0.28 s with
+  this eel share would spawn roughly twice the target weight.
+- **Fairness:** a non-eel may jump at most 40% of what the capped net can cover
+  in one spawn period; eels and fish arriving within 0.35 s are at least 0.4
+  widths apart; eel hitbox radius 0.032 widths.
+- **Assist ("the river calms")** and **Endless "Hard River"** are unchanged in
+  intent and are Gate 2.
 
 ### 3.4 Net feel
 - Net moves along a 1-D rail across the river at the catch zone, drawn as a
@@ -238,7 +252,9 @@ code is in scope.
 - **Oracle bot:** a planner with perfect information but the real net speed cap
   must reach 200 lb with zero eels on every test seed (proves winnability).
 - **Human-like bot:** reaction delay 220 ms, aim noise, same speed cap; report
-  median time to 200, win rate, phase of first loss. Target win rate 35–60%.
+  median time to 200, win rate, phase of first loss, and the pace curve (lb vs
+  time). Targets: win rate 35–60%; ~50 lb by 0:40, ~100 lb by 1:15, 200 lb by
+  ~2:15; first fish at the net within ~2 s.
 - Playwright smoke + visual captures for all hook states on desktop (1440×900)
   and mobile (390×844), the canvas inspector manifest, renderer diagnostics.
 - Real-input checks: mouse, keyboard, touch drag (emulated), gamepad (if
