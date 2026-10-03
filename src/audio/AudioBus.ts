@@ -55,7 +55,7 @@ export class AudioBus {
       this.master.connect(this.ctx.destination);
       for (const [group, volume] of [
         ['sfx', 0.8],
-        ['ambience', 0.5],
+        ['ambience', 1.5],
         ['music', 0.5],
       ] as const) {
         const gain = this.ctx.createGain();

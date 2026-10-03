@@ -87,5 +87,20 @@ Kyle will turn this into a blog post, so write it plainly and honestly.
 
 ## Commands
 
-(Fill in once the scaffold is set up: dev, build, preview, test, check,
-test:e2e, inspect:canvas, verify:visual, bot playtest.)
+- `npm run dev` — dev server at http://127.0.0.1:5188 (dev tools + path editor load here, or with `?debug`)
+- `npm run build` — typecheck + production build; `postbuild` scans `dist/` for secrets
+- `npm run preview` — serve the build at http://127.0.0.1:4188
+- `npm run check` — lint + typecheck + unit tests + secret scan of tracked files
+- `npm run test` — Vitest sim suite (`tests/sim/`)
+- `npm run test:e2e` — Playwright smoke on desktop + mobile projects (`tests/e2e/`), real input
+- `npm run build:scene` — regenerate palette, re-quantized painting, masks, fisherman from the v1 art
+  (`scripts/build-scene.mjs` + `scripts/masks.json`); inspect `artifacts/scene-debug/` afterwards
+- `node scripts/capture.mjs --out <dir> --state <hook-state> [--query "grid=216x387&fish=voxel"] [--frames N]`
+  — captures at exactly 1440×900 and 390×844 through the test hooks (dev server must be running)
+- `npm run inspect:canvas -- --manifest artifacts/evidence.json --url http://127.0.0.1:5188 --seed 42`
+  — canvas inspector; then `python3 .claude/skills/threejs-game-director/scripts/check_evidence.py . --manifest artifacts/evidence.json`
+- Bot playtest: not built yet (Gate 2). `src/sim/bots/tracker.ts` is only a capture/smoke helper.
+
+Hook states (`__THREE_GAME_TEST_HOOKS__.setState`): `title`, `active-play`, `phase:<id>` (also
+`phase.<id>`, because the inspector rejects colons), `rest`, `pause`, `loss-eel`, `loss-escaped`.
+Look-dev URL params: `?grid=192x344|216x387|256x459|384x688`, `?fish=voxel`, `?ripple=byte`, `?seed=N`.

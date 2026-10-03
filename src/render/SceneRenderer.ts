@@ -336,9 +336,18 @@ export class SceneRenderer {
   }
 
   /** Text or a flat panel placed in target texels. Pass an empty string to remove it. */
-  label(id: string, text: string, x: number, y: number, color: string, align: 'left' | 'center' | 'right' = 'left', shadow = true): number {
+  label(
+    id: string,
+    text: string,
+    x: number,
+    y: number,
+    color: string,
+    align: 'left' | 'center' | 'right' = 'left',
+    shadow = true,
+    title = false,
+  ): number {
     // A one-texel drop shadow keeps text legible over the painting.
-    if (shadow) this.label(`${id}~shadow`, text, x + 1, y + 1, '#030911', align, false);
+    if (shadow) this.label(`${id}~shadow`, text, x + 1, y + 1, '#030911', align, false, title);
     let item = this.ui.get(id);
     if (!text) {
       if (item) item.mesh.visible = false;
@@ -357,7 +366,7 @@ export class SceneRenderer {
     if (item.text !== key) {
       const old = item.material.uniforms.uMap!.value as THREE.Texture;
       if (old !== this.white) old.dispose();
-      const bitmap = rasterizeText(text, hexToRgb(color));
+      const bitmap = rasterizeText(text, hexToRgb(color), title);
       item.material.uniforms.uMap!.value = bitmap.texture;
       (item.material.uniforms.uRect!.value as THREE.Vector4).set(0, 0, bitmap.width, bitmap.height);
       item.text = key;

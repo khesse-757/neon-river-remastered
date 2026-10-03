@@ -3,7 +3,7 @@ import { Loop } from '../core/Loop';
 import { RIVER } from '../data/river';
 import { Input } from '../input/Input';
 import { loadSceneAssets, paletteColor } from '../render/assets';
-import { PIXEL_FONT } from '../render/PixelText';
+import { PIXEL_FONT, TITLE_FONT } from '../render/PixelText';
 import { SceneRenderer, type FishStyle, type FishView, type FrameView, type LightView } from '../render/SceneRenderer';
 import { trackerIntent } from '../sim/bots/tracker';
 import { DEFAULT_CONFIG, PHASES, type SimConfig } from '../sim/config';
@@ -138,7 +138,11 @@ export class Game {
   }
 
   private async load(gridW: number, gridH: number): Promise<void> {
-    const [assets] = await Promise.all([loadSceneAssets(gridW, gridH), document.fonts.load(`8px ${PIXEL_FONT}`)]);
+    const [assets] = await Promise.all([
+      loadSceneAssets(gridW, gridH),
+      document.fonts.load(`8px ${PIXEL_FONT}`),
+      document.fonts.load(`16px ${TITLE_FONT}`),
+    ]);
     this.view = new SceneRenderer(this.canvas, assets, this.river, { forceByteRipples: this.options.forceByteRipples });
     if (this.options.fish === 'voxel') this.view.fishStyle = 'voxel';
     this.input = new Input(this.canvas, {
@@ -554,8 +558,11 @@ export class Game {
       this.overlay.place(name, on ? { x: x - 1, y: y - 1, w: w + 2, h: 22 } : null);
     };
 
+    const heading = (id: string, on: boolean, str: string, y: number, color: string): void => {
+      v.label(id, on ? str : '', cx, y, color, 'center', true, true);
+    };
     const title = this.mode === 'title';
-    text('title-logo', title, 'N E O N   R I V E R', at(0.27), '#8ff8ff');
+    heading('title-logo', title, 'NEON RIVER', at(0.27) - 8, '#8ff8ff');
     text('title-sub', title, 'A NIGHT ON THE WATER', at(0.27) + 13, '#6d9bb1');
     text('title-rule-1', title, 'CATCH 200 LB', at(0.42), '#c5e1e8');
     text('title-rule-2', title, 'LET NO MORE THAN 20 LB ESCAPE', at(0.42) + 11, '#c5e1e8');
@@ -564,12 +571,12 @@ export class Game {
     text('title-hint', title, 'DRAG - MOUSE - A/D - GAMEPAD', at(0.58) + 30, '#6d9bb1');
 
     const paused = this.mode === 'paused';
-    text('paused-title', paused, 'P A U S E D', at(0.36), '#8ff8ff');
+    heading('paused-title', paused, 'PAUSED', at(0.36) - 8, '#8ff8ff');
     button('resume', paused, 'RESUME', at(0.44));
 
     const over = this.mode === 'over';
     const won = this.lossCause === null;
-    text('over-title', over, won ? 'A   F U L L   N E T' : 'T H E   N I G H T   E N D S', at(0.3), won ? '#ffd98a' : '#8ff8ff');
+    heading('over-title', over, won ? 'A FULL NET' : 'THE NIGHT ENDS', at(0.3) - 8, won ? '#ffd98a' : '#8ff8ff');
     const cause = won ? 'THE RIVER PROVIDES' : this.lossCause === 'eel' ? 'AN ELECTRIC EEL FOUND YOUR NET' : 'TOO MANY FISH SLIPPED AWAY';
     text('over-cause', over, cause, at(0.3) + 14, '#c5e1e8');
     text('over-stats-1', over, `${s.caught} LB CAUGHT - ${s.escaped} LB ESCAPED`, at(0.3) + 30, '#6d9bb1');

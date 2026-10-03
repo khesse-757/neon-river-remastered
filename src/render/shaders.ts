@@ -26,6 +26,10 @@ uniform vec4 uLantern;
 uniform float uWind;
 uniform float uNeon;
 uniform float uDarken;
+// Menus and the eel shock sink the scene toward the deepest night blue (not toward black, which
+// drags stone and grass through unrelated palette hues).
+vec3 dimmed(vec3 c) { return mix(c, vec3(0.012, 0.035, 0.067), uDarken); }
+
 
 ivec2 targetTexel() {
   return ivec2(int(gl_FragCoord.x), int(uTarget.y) - 1 - int(gl_FragCoord.y));
@@ -142,7 +146,7 @@ void main() {
     if (hash(vec2(q) + floor(uTime * 1.6)) < 0.22) col = bgAt(q + ivec2(1, 1));
   }
 
-  col = applyLights(col, t, water) * (1.0 - uDarken);
+  col = dimmed(applyLights(col, t, water));
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -161,11 +165,11 @@ void main() {
     vec3 c = paintingAt(q);
     // Only stalks occlude; water seen between them stays transparent so fish show through.
     if (c.b > c.g + 0.02 && c.b > c.r + 0.04) discard;
-    gl_FragColor = vec4(applyLights(c, t, false) * (1.0 - uDarken), 1.0);
+    gl_FragColor = vec4(dimmed(applyLights(c, t, false)), 1.0);
     return;
   }
   if (maskB(q).b > 0.5) {
-    gl_FragColor = vec4(applyLights(bgAt(q), t, false) * (1.0 - uDarken), 1.0);
+    gl_FragColor = vec4(dimmed(applyLights(bgAt(q), t, false)), 1.0);
     return;
   }
   if (mA.r < 0.5) discard;
@@ -195,7 +199,7 @@ void main() {
     lit = true;
   }
   if (!lit) discard;
-  gl_FragColor = vec4(applyLights(col, t, true) * (1.0 - uDarken), 1.0);
+  gl_FragColor = vec4(dimmed(applyLights(col, t, true)), 1.0);
 }`;
 
 /** Wave-equation height field in painting space; rings are squashed to read as lying on the water. */
@@ -260,6 +264,10 @@ precision highp float;
 uniform sampler2D uAtlas;
 uniform vec3 uDeep;
 uniform float uDarken;
+// Menus and the eel shock sink the scene toward the deepest night blue (not toward black, which
+// drags stone and grass through unrelated palette hues).
+vec3 dimmed(vec3 c) { return mix(c, vec3(0.012, 0.035, 0.067), uDarken); }
+
 varying vec2 vLocal;
 varying vec4 vRect;
 varying vec4 vAnim;
@@ -281,7 +289,7 @@ void main() {
   if (vLook.z < 1.0 && mod(l.x + l.y, 2.0) >= vLook.z * 2.0) discard;
   vec3 col = c.a < 0.75 ? mix(uDeep * 0.55, c.rgb, 1.0 - min(1.0, vLook.x * 2.4)) : mix(c.rgb, uDeep, vLook.x);
   col = mix(col, vec3(1.0), vLook.y);
-  gl_FragColor = vec4(col * (1.0 - uDarken), 1.0);
+  gl_FragColor = vec4(dimmed(col), 1.0);
 }`;
 
 /** Plain textured quad placed in target texels (fisherman, lantern, text, panels). */
@@ -303,6 +311,10 @@ uniform vec4 uRect;
 uniform vec3 uTint;
 uniform float uTintMix;
 uniform float uDarken;
+// Menus and the eel shock sink the scene toward the deepest night blue (not toward black, which
+// drags stone and grass through unrelated palette hues).
+vec3 dimmed(vec3 c) { return mix(c, vec3(0.012, 0.035, 0.067), uDarken); }
+
 varying vec2 vLocal;
 void main() {
 #ifdef FLAT
@@ -311,7 +323,7 @@ void main() {
   vec4 c = texelFetch(uMap, ivec2(floor(vLocal)), 0);
 #endif
   if (c.a < 0.5) discard;
-  gl_FragColor = vec4(mix(c.rgb, uTint, uTintMix) * (1.0 - uDarken), 1.0);
+  gl_FragColor = vec4(dimmed(mix(c.rgb, uTint, uTintMix)), 1.0);
 }`;
 
 /** The fisherman: his sprite, deformed in whole texels. */
@@ -324,6 +336,10 @@ uniform float uLean; // -1, 0, 1 hat tilt
 uniform float uJolt; // -1, 0, 1
 uniform float uRim;
 uniform float uDarken;
+// Menus and the eel shock sink the scene toward the deepest night blue (not toward black, which
+// drags stone and grass through unrelated palette hues).
+vec3 dimmed(vec3 c) { return mix(c, vec3(0.012, 0.035, 0.067), uDarken); }
+
 varying vec2 vLocal;
 vec4 at(vec2 l) {
   if (l.x < 0.0 || l.y < 0.0 || l.x >= uRect.z || l.y >= uRect.w) return vec4(0.0);
@@ -344,7 +360,7 @@ void main() {
   vec3 col = c.rgb;
   // Warm rim on the lantern side (his left).
   if (pose(l - vec2(1.0, 0.0)).a < 0.5 && l.y / uRect.w > 0.3) col = mix(col, vec3(1.0, 0.7, 0.28), uRim);
-  gl_FragColor = vec4(col * (1.0 - uDarken), 1.0);
+  gl_FragColor = vec4(dimmed(col), 1.0);
 }`;
 
 /** Net pole, hoop and mesh, drawn analytically at texel centres. */
@@ -356,6 +372,10 @@ uniform vec2 uHoop;
 uniform vec2 uRadii;
 uniform float uKick;
 uniform float uDarken;
+// Menus and the eel shock sink the scene toward the deepest night blue (not toward black, which
+// drags stone and grass through unrelated palette hues).
+vec3 dimmed(vec3 c) { return mix(c, vec3(0.012, 0.035, 0.067), uDarken); }
+
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uTarget.y - gl_FragCoord.y);
   vec2 c = uHoop + vec2(0.0, uKick);
@@ -382,7 +402,7 @@ void main() {
     if (d > 1.3) discard;
     col = n.y < 0.0 ? vec3(0.631, 0.596, 0.478) : vec3(0.514, 0.267, 0.2);
   }
-  gl_FragColor = vec4(col * (1.0 - uDarken), 1.0);
+  gl_FragColor = vec4(dimmed(col), 1.0);
 }`;
 
 /** One-texel particles. */
@@ -420,11 +440,15 @@ precision highp float;
 uniform vec3 uDeep;
 uniform float uTint;
 uniform float uDarken;
+// Menus and the eel shock sink the scene toward the deepest night blue (not toward black, which
+// drags stone and grass through unrelated palette hues).
+vec3 dimmed(vec3 c) { return mix(c, vec3(0.012, 0.035, 0.067), uDarken); }
+
 varying vec3 vColor;
 varying vec3 vNormal;
 void main() {
   float ramp = vNormal.y > 0.5 ? 1.0 : (vNormal.z > 0.3 ? 0.72 : 0.5);
-  gl_FragColor = vec4(mix(vColor * ramp, uDeep, uTint) * (1.0 - uDarken), 1.0);
+  gl_FragColor = vec4(dimmed(mix(vColor * ramp, uDeep, uTint)), 1.0);
 }`;
 
 /** Palette lock: nearest two palette colors + 4x4 Bayer, at target resolution. */

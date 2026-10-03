@@ -4,6 +4,12 @@
   font-display: block;
 }
 
+@font-face {
+  font-family: 'DotGothic16';
+  src: url('/fonts/DotGothic16-Latin.ttf') format('truetype');
+  font-display: block;
+}
+
 :root {
   /* CSS pixels per game texel; set from the renderer so UI text sits on the pixel grid. */
   --texel: 2px;

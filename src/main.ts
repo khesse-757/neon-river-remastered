@@ -15,6 +15,7 @@ game.start();
 
 // Dev tools (path editor, lil-gui) never load on the default production path.
 if (import.meta.env.DEV || params.has('debug')) {
+  (window as unknown as { __neonRiver?: Game }).__neonRiver = game;
   void import('./dev/DevTools').then(({ installDevTools }) => installDevTools(game));
 }
 
